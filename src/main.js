@@ -1,9 +1,12 @@
 import './style.css';
 import { Game } from './game/Game.js';
+import { AssetLoader } from './game/core/AssetLoader.js';
 import { startVersionWatcher } from './game/core/VersionWatcher.js';
 
 const canvas = document.querySelector('#game');
-let game = new Game(canvas);
+const assets = new AssetLoader();
+assets.loadAll();
+let game = new Game(canvas, assets);
 startVersionWatcher();
 
 const resize = () => game.resize();
@@ -27,7 +30,7 @@ if (import.meta.hot) {
     if (!mod?.Game) return;
     const previous = game;
     previous.destroy();
-    game = new mod.Game(canvas);
+    game = new mod.Game(canvas, previous.assets || assets);
     game.adoptRuntime?.(previous);
   });
   import.meta.hot.dispose(() => game.destroy());

@@ -68,17 +68,21 @@ export class TowTruck extends Vehicle {
     }
   }
 
-  drawFallbackVehicle(ctx) {
-    super.drawFallbackVehicle(ctx);
+  // The boom base and stripe belong to the painted body; the cable, hook and
+  // beacon animate, so they always draw procedurally on top.
+  drawBodyExtras(ctx, { sprite }) {
     const { length, width } = this.config;
     ctx.save();
-    ctx.strokeStyle = '#4c5961';
-    ctx.lineWidth = 13;
+    if (!sprite) {
+      ctx.strokeStyle = '#4c5961';
+      ctx.lineWidth = 13;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-length * 0.15, 0);
+      ctx.lineTo(-length * 0.37, 0);
+      ctx.stroke();
+    }
     ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-length * 0.15, 0);
-    ctx.lineTo(-length * 0.37, 0);
-    ctx.stroke();
     ctx.lineWidth = 8;
     ctx.strokeStyle = '#f3c85c';
     ctx.beginPath();
@@ -90,9 +94,11 @@ export class TowTruck extends Vehicle {
     ctx.arc(-length * (0.48 + this.hook * 0.18), 0, 10, 0, TAU);
     ctx.fill();
 
-    ctx.fillStyle = '#ffd85f';
-    roundRect(ctx, -14, -width * 0.48, 28, width * 0.96, 7);
-    ctx.fill();
+    if (!sprite) {
+      ctx.fillStyle = '#ffd85f';
+      roundRect(ctx, -14, -width * 0.48, 28, width * 0.96, 7);
+      ctx.fill();
+    }
     ctx.restore();
 
     if (this.beacon > 0.05) {

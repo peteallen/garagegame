@@ -1,5 +1,6 @@
 import { clamp, damp, easeOutBack, rand, roundRect, TAU, wrapAngle } from '../core/math.js';
 import { orientedFootprint, VehicleMotion } from '../core/VehicleMotion.js';
+import { SPRITE_OVERHANG } from '../core/assetManifest.js';
 import { vehicleConfig } from './vehicleCatalog.js';
 
 const SURPRISE_DURATIONS = {
@@ -231,9 +232,57 @@ export class Vehicle {
     }
 
     if (this.selected || this.glow > 0.05) this.drawSelection(ctx);
-    this.drawFallbackVehicle(ctx);
+    this.drawBody(ctx, assets);
     this.drawCare(ctx);
     this.drawProblem(ctx);
+    ctx.restore();
+  }
+
+  bodySprite(assets) {
+    return assets?.get?.(`vehicle_${this.type}`) || null;
+  }
+
+  // The generated sprite is only the painted body; wheels stay procedural
+  // underneath (they steer), and the whole face/wiper/trunk/flash system
+  // draws on top, so every animation works with or without art.
+  drawBody(ctx, assets) {
+    const action = this.surprise;
+    const trunkOpen = action?.name === 'trunk' ? Math.sin(clamp(action.elapsed / 0.6, 0, 1) * Math.PI / 2) : 0;
+    const lightsOn = this.motion.moving || this.problem || action?.name === 'headlights';
+    const flashOn = this.problem ? this.flash > 0.45 : action?.name === 'headlights' && Math.sin(action.elapsed * 10) > 0;
+    const sprite = this.bodySprite(assets);
+
+    this.drawWheels(ctx);
+    if (sprite) {
+      const { length, width } = this.config;
+      ctx.drawImage(
+        sprite,
+        -length / 2 - SPRITE_OVERHANG,
+        -width / 2 - SPRITE_OVERHANG,
+        length + SPRITE_OVERHANG * 2,
+        width + SPRITE_OVERHANG * 2
+      );
+      if (this.type === 'police') this.drawLightBarFlash(ctx);
+    } else {
+      this.drawFallbackBody(ctx);
+    }
+    this.drawBodyExtras(ctx, { sprite: Boolean(sprite) });
+    if (action?.name === 'wipers') this.drawWipers(ctx, action.elapsed);
+    if (trunkOpen > 0.02) this.drawOpenTrunk(ctx, trunkOpen);
+    this.drawFace(ctx, { lightsOn, flashOn });
+  }
+
+  // Subclass hook for parts that animate over the painted body (tow hook).
+  drawBodyExtras(ctx, info) {} // eslint-disable-line no-unused-vars
+
+  drawLightBarFlash(ctx) {
+    ctx.save();
+    ctx.globalAlpha = 0.72;
+    ctx.fillStyle = Math.sin(this.t * 11) > 0 ? '#f05252' : '#4c8de7';
+    ctx.shadowColor = ctx.fillStyle;
+    ctx.shadowBlur = 14;
+    roundRect(ctx, -9, -27, 30, 54, 7);
+    ctx.fill();
     ctx.restore();
   }
 
@@ -250,14 +299,8 @@ export class Vehicle {
     ctx.restore();
   }
 
-  drawFallbackVehicle(ctx) {
+  drawFallbackBody(ctx) {
     const { length, width, color, accent } = this.config;
-    const action = this.surprise;
-    const trunkOpen = action?.name === 'trunk' ? Math.sin(clamp(action.elapsed / 0.6, 0, 1) * Math.PI / 2) : 0;
-    const lightsOn = this.motion.moving || this.problem || action?.name === 'headlights';
-    const flashOn = this.problem ? this.flash > 0.45 : action?.name === 'headlights' && Math.sin(action.elapsed * 10) > 0;
-
-    this.drawWheels(ctx);
 
     ctx.save();
     ctx.shadowColor = 'rgba(28,47,52,.35)';
@@ -285,16 +328,12 @@ export class Vehicle {
     ctx.lineTo(length * 0.16, width * 0.25);
     ctx.stroke();
 
-    if (action?.name === 'wipers') this.drawWipers(ctx, action.elapsed);
     if (this.type === 'pickup') this.drawPickupBed(ctx);
     if (this.type === 'taxi') this.drawRoofBadge(ctx, '#263d4d');
     if (this.type === 'police') this.drawLightBar(ctx);
     if (this.type === 'fire') this.drawFireGear(ctx);
     if (this.type === 'icecream') this.drawIceCreamTop(ctx);
     if (this.type === 'bus') this.drawBusWindows(ctx);
-
-    if (trunkOpen > 0.02) this.drawOpenTrunk(ctx, trunkOpen);
-    this.drawFace(ctx, { lightsOn, flashOn });
   }
 
   drawWheels(ctx) {
