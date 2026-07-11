@@ -1,14 +1,70 @@
 # Beep Beep Garage! 🚗
 
-A warm, no-reading-required garage game made for a three-year-old who loves cars and trucks. The game fills the browser with one touch-friendly canvas and is designed first for an iPad in landscape.
+Beep Beep Garage is a warm, no-reading-required toy-car game made for a three-year-old. It fills the browser with one touch-friendly canvas and is designed first for an iPad in landscape. There are no scores, crashes, wrong choices, or fail states.
 
-## Run the live workbench
+Play the published game at [peteallen.github.io/garagegame](https://peteallen.github.io/garagegame/).
+
+## How to play
+
+Tap the bell by the garage door and a car drives in, greets the player, and waits on the road. Tap the waiting car and then an open bay, or drag the car into a bay, to watch it drive around and reverse into its spot. Large vehicles use the large bay when they need it.
+
+Tap a parked car and then another open bay to move it. The car pulls out and reverse-parks again; if the destination is behind it, the car drives around the block and approaches from the correct direction. Cars are solid, politely yield when their paths meet, and never wreck.
+
+Tap a parked car and then tap the road, or drag it onto the road, to send it home. The pickup booth offers a second game: tap the booth, find the car shown in the picture bubble, and tap that car for a cheerful drive-out celebration. Tap parked cars for small animated surprises, tap the garage cat for affection, and use the sun, moon, and speaker pictures to change the lighting or mute the sound.
+
+If nobody interacts for roughly a minute, one harmless parked-car or cat surprise may happen. It never creates a new car, problem, or pickup request. Parked cars, waiting cars, day or night mode, and mute preference survive a reload.
+
+## Run locally
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open `http://localhost:5173`. Vite hot module replacement keeps the page current while the game is being built, and sound will unlock on the first tap to satisfy browser autoplay rules.
+Run those commands from the repository root, then open `http://localhost:5173`. Sound unlocks on the first tap because browsers do not allow autoplay. Vite hot module replacement keeps that page current during development and carries the unlocked audio stack across game-code updates.
 
-The current first slice establishes the responsive garage world, the entrance bell, the production build, strict asset-manifest checking, and the GitHub Pages cache/version foundation. Gameplay, generated art, voice, recorded sound effects, and the full contributor guide are being added in independently testable slices.
+For deterministic testing, open the game with `?debug`. The live instance is `window.__garageGame`, and the simulation can be advanced without waiting for animation frames:
+
+```js
+for (let i = 0; i < 600; i += 1) window.__garageGame.update(1 / 60);
+```
+
+Run the complete asset gate and production build before pushing:
+
+```bash
+npm run build
+```
+
+## Architecture
+
+`src/game/Game.js` owns the main loop, input routing, persistence, vehicle coordination, audio calls, y-sorted drawing, and the one-shot idle charm. `src/game/world/Garage.js` defines the visible world, bays, road and touch zones, and every arrival, parking, repark, and exit route. `src/game/entities/Vehicle.js` renders and updates cars, while `src/game/core/VehicleMotion.js` follows and validates every cubic driving path.
+
+`src/game/entities/Pet.js` gives the garage cat its wandering, stretching, dancing, and roof-napping life. `src/game/actions/vehicleSurprises.js` contains safe weighted car reactions. `src/game/ui/Hud.js` draws the two icon-only controls, and `src/game/fx/Particles.js` supplies sparkles, hearts, foam, exhaust, and confetti.
+
+`src/game/core/AssetLoader.js` loads optional sprites and leaves procedural fallbacks in place when art is missing. `SoundEngine.js` provides synthesized sound and the shared Web Audio graph, `Sfx.js` plays recorded effects with those synth fallbacks, and `Voice.js` selects bright, warm, or deep spoken takes for each vehicle.
+
+The complete movement, sprite-registration, asset, testing, and deployment contracts are documented in `AGENTS.md`. Service-station driving, tow rescue, and an all-done celebration are intentionally deferred and are not presented as working gameplay.
+
+## Art and audio pipelines
+
+Final browser assets live under `public/assets`. Source artwork, anchors, prompts, and regeneration history live under `art`, while the processing and media scripts live under `scripts`. Every shipped sprite, voice line, and effect must be declared in `src/game/core/assetManifest.js`; `npm run check:assets` checks files and keys in both directions and confirms that vehicle PNG dimensions match their physical catalog dimensions.
+
+Vehicle art starts as a consistent clay-toy render, is edited to strict top-down nose-right registration, then is chroma-keyed and scaled by `scripts/process_art.py`. Painted bodies contain no face or wheels because those parts animate procedurally. `art/gen.sh` currently expects the configured machine-local OpenRouter image helper; image processing and editing are repository-owned scripts. Voice clips are generated by `scripts/gen_voice.py`, trimmed, and transcription-checked by `scripts/verify_voice.py` or `scripts/voice_qa_loop.sh`. Recorded effects are generated by `scripts/gen_sfx.py`; essential gameplay sounds keep synthesized fallbacks, while a purely decorative layer such as a confetti pop may simply stay quiet when its clip is unavailable.
+
+## Models
+
+The script defaults and this table form the project model registry. Update both when a pipeline changes.
+
+| Purpose | Model or service | Voices or output | Configuration | Why it is used |
+| --- | --- | --- | --- | --- |
+| Image generation | `google/gemini-3.1-flash-image-preview` | PNG | `IMAGE_MODEL` in `art/gen.sh` | Produces the clay-toy style anchors and environment art. |
+| Image editing | `google/gemini-3.1-flash-image-preview` | PNG | `EDIT_MODEL` in `scripts/edit_image.py` | Keeps top-down vehicle edits visually consistent with their anchors. |
+| Voice generation | `openai/gpt-audio` | `shimmer` bright, `coral` warm, `ash` deep | `VOICE_MODEL` in `scripts/gen_voice.py` | Gives small cars, medium vehicles, and large trucks distinct friendly registers. |
+| Voice transcription QA | `google/gemini-3.5-flash` | Verbatim transcript | `TRANSCRIBE_MODEL` in `scripts/verify_voice.py` | Reliably catches takes where the speech model replied to a line instead of reading it. |
+| Sound effects | ElevenLabs sound generation | MP3 | `ELEVENLABS_API_KEY` or `~/.codex/.env` | Produces clean vehicle, garage, celebration, and cat recordings that Web Audio cannot convincingly synthesize. |
+
+## Deployment
+
+The source branch is `main`. A push to `main` runs `.github/workflows/pages.yml`, builds a versioned production bundle, publishes `dist` to `gh-pages`, and requests the branch-based GitHub Pages build. `src/game/core/VersionWatcher.js` checks the deployed `version.json` and refreshes an older open game when a new bundle becomes available.
+
+After a release, verify the workflow, the `gh-pages` branch, the latest Pages build status, the live version file, and the bundle referenced by the live HTML. A successful source push alone does not prove that the iPad is serving the new game.

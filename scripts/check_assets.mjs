@@ -80,7 +80,7 @@ for (const file of sourceFiles) {
   for (const match of text.matchAll(/assets\.get(?:Tinted)?\(\s*'([^']+)'/g)) {
     if (!spriteKeys.has(match[1])) errors.push(`${relative} references undeclared sprite '${match[1]}'`);
   }
-  for (const match of text.matchAll(/sfx\.play\(\s*'([^']+)'/g)) {
+  for (const match of text.matchAll(/(?:sfx\.play|playSfx)(?:\?\.)?\(\s*'([^']+)'/g)) {
     if (!sfxKeys.has(match[1])) errors.push(`${relative} plays undeclared sfx '${match[1]}'`);
   }
   for (const match of text.matchAll(/\bsay\(\s*'([^']+)'/g)) {
