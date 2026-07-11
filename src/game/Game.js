@@ -10,10 +10,12 @@ import { SoundEngine } from './core/SoundEngine.js';
 import { Sfx } from './core/Sfx.js';
 import { Voice } from './core/Voice.js';
 import { cubicPoint, polygonsOverlap } from './core/VehicleMotion.js';
-import { clamp, dist, pick, roundRect, TAU } from './core/math.js';
-import { triggerVehicleSurprise } from './actions/vehicleSurprises.js';
+import { clamp, dist, pick, rand, roundRect, TAU } from './core/math.js';
+import { idleSafeSurprise, triggerVehicleSurprise } from './actions/vehicleSurprises.js';
 
 const SPLASH_DURATION = 4.2;
+const IDLE_CHARM_MIN = 45;
+const IDLE_CHARM_MAX = 60;
 
 export class Game {
   constructor(canvas, assets = null) {
@@ -35,6 +37,8 @@ export class Game {
     this.sfx = new Sfx(this.sound);
     this.voice = new Voice(this.sound);
     this.welcomed = false;
+    this.idleCharmTime = rand(IDLE_CHARM_MIN, IDLE_CHARM_MAX);
+    this.idleCharmArmed = true;
     this.particles = new Particles();
     this.garage = new Garage(this);
     const saved = loadGarageState(this.garage);
@@ -70,6 +74,8 @@ export class Game {
       if (previous.voice) this.voice = previous.voice;
     }
     this.welcomed = Boolean(previous.welcomed);
+    if (Number.isFinite(previous.idleCharmTime)) this.idleCharmTime = previous.idleCharmTime;
+    if (typeof previous.idleCharmArmed === 'boolean') this.idleCharmArmed = previous.idleCharmArmed;
     this.splashTime = 0; // no splash replay on hot swaps mid-session
   }
 
@@ -95,6 +101,7 @@ export class Game {
   }
 
   onPointerDown(clientX, clientY) {
+    this.notePlayerActivity();
     this.sound.unlock();
     this.splashTime = Math.min(this.splashTime, 0.45);
     const point = this.toWorld(clientX, clientY);
@@ -103,6 +110,7 @@ export class Game {
   }
 
   onPointerMove(clientX, clientY) {
+    this.notePlayerActivity();
     if (!this.pointer) return;
     const point = this.toWorld(clientX, clientY);
     this.pointer.point = point;
@@ -113,6 +121,7 @@ export class Game {
   }
 
   onPointerUp(clientX, clientY) {
+    this.notePlayerActivity();
     if (!this.pointer) return;
     const point = this.toWorld(clientX, clientY);
     const moved = dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y);
@@ -457,9 +466,11 @@ export class Game {
   }
 
   // Solid-vehicle yielding: a mover holds when its ahead-probe touches anyone.
-  // Between two movers the earlier mover has right of way, so exactly one
-  // yields and jams can't be mutual. Stationary blockers always win — the
-  // held car beeps until the player (or a pickup) clears the way.
+  // A car already ahead always keeps moving, even if it started later; this
+  // makes the road act like a polite single-file lane instead of letting a
+  // faster, earlier mover drive through its rear bumper. Only when both cars'
+  // probes see each other does move order break the tie. Stationary blockers
+  // always win.
   motionBlocked(vehicle) {
     const probe = vehicle.aheadFootprint();
     // The tow truck stays a friendly prop (not solid) until the rescue arc
@@ -469,7 +480,8 @@ export class Game {
       if (other === vehicle) continue;
       if (!polygonsOverlap(probe, other.footprint(4))) continue;
       if (other.moving) {
-        if (other.moveSeq < vehicle.moveSeq) return true;
+        const mutualConflict = polygonsOverlap(other.aheadFootprint(), vehicle.footprint(4));
+        if (!mutualConflict || other.moveSeq < vehicle.moveSeq) return true;
         continue;
       }
       return true;
@@ -530,9 +542,32 @@ export class Game {
     saveGarageState(this);
   }
 
+  notePlayerActivity() {
+    this.idleCharmTime = rand(IDLE_CHARM_MIN, IDLE_CHARM_MAX);
+    this.idleCharmArmed = true;
+  }
+
+  runIdleCharm() {
+    const candidates = this.vehicles.filter((vehicle) =>
+      vehicle.status === 'parked' && !vehicle.moving && !vehicle.problem && !vehicle.surprise
+    );
+    while (candidates.length) {
+      const [vehicle] = candidates.splice(Math.floor(Math.random() * candidates.length), 1);
+      if (idleSafeSurprise(vehicle)) return;
+    }
+    this.pet.idleCharm();
+  }
+
   update(dt) {
     this.time += dt;
     this.splashTime = Math.max(0, this.splashTime - dt);
+    if (this.idleCharmArmed) {
+      this.idleCharmTime -= dt;
+      if (this.idleCharmTime <= 0) {
+        this.idleCharmArmed = false;
+        this.runIdleCharm();
+      }
+    }
     if (window.innerWidth !== this._lastW || window.innerHeight !== this._lastH) {
       this._lastW = window.innerWidth;
       this._lastH = window.innerHeight;

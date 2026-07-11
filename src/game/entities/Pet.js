@@ -12,6 +12,7 @@ export class Pet {
     this.t = rand(0, 20);
     this.bounce = 0;
     this.roofCar = null;
+    this.roofTarget = null;
   }
 
   get baseline() {
@@ -31,6 +32,8 @@ export class Pet {
       this.bounce = 1;
       return;
     }
+    this.roofTarget = null;
+    this.target = null;
     this.state = 'stretch';
     this.stateTime = 2.2;
     this.bounce = 1;
@@ -39,14 +42,26 @@ export class Pet {
   }
 
   dance(duration = 4) {
-    this.roofCar = null;
+    this.dismountToFloor();
     this.state = 'dance';
     this.stateTime = duration;
   }
 
+  dismountToFloor() {
+    const bounds = this.game?.garage?.petBounds || { minX: 260, maxX: 1380, minY: 560, maxY: 710 };
+    if (this.roofCar) this.x = this.roofCar.x + this.heading * 70;
+    this.x = Math.max(bounds.minX, Math.min(bounds.maxX, this.x));
+    this.y = Math.max(bounds.minY, Math.min(bounds.maxY, this.y));
+    this.roofCar = null;
+    this.roofTarget = null;
+    this.target = null;
+  }
+
   napOn(vehicle) {
-    if (!vehicle || vehicle.moving) return false;
+    if (!vehicle || vehicle.moving || vehicle.status !== 'parked') return false;
     this.roofCar = vehicle;
+    this.roofTarget = null;
+    this.target = null;
     this.state = 'roofNap';
     this.stateTime = rand(10, 20);
     return true;
@@ -58,11 +73,29 @@ export class Pet {
       this.stateTime = 2.4;
       return;
     }
-    if (!this.roofCar) this.pickWanderTarget();
+    if (!this.roofCar && !this.pickRoofTarget()) this.pickWanderTarget();
+  }
+
+  pickRoofTarget() {
+    const parked = this.game?.vehicles?.filter((vehicle) =>
+      vehicle.status === 'parked' && !vehicle.moving && !vehicle.problem
+    ) || [];
+    if (!parked.length) return false;
+    const vehicle = parked[Math.floor(Math.random() * parked.length)];
+    const bounds = this.game?.garage?.petBounds || { minX: 260, maxX: 1380, minY: 560, maxY: 710 };
+    this.roofTarget = vehicle;
+    this.target = {
+      x: Math.max(bounds.minX, Math.min(bounds.maxX, vehicle.x)),
+      y: bounds.minY,
+    };
+    this.state = 'walkToRoof';
+    this.stateTime = 16;
+    return true;
   }
 
   pickWanderTarget() {
     const bounds = this.game?.garage?.petBounds || { minX: 260, maxX: 1380, minY: 560, maxY: 710 };
+    this.roofTarget = null;
     this.target = { x: rand(bounds.minX, bounds.maxX), y: rand(bounds.minY, bounds.maxY) };
     this.state = 'walk';
     this.stateTime = 12;
@@ -77,23 +110,25 @@ export class Pet {
       this.x = this.roofCar.x;
       this.y = this.roofCar.y;
       if (this.roofCar.moving || this.stateTime <= 0) {
-        this.x += Math.cos(this.roofCar.heading + Math.PI / 2) * 70;
-        this.y += Math.sin(this.roofCar.heading + Math.PI / 2) * 70;
-        this.roofCar = null;
+        this.dismountToFloor();
         this.state = 'stretch';
         this.stateTime = 1.7;
       }
       return;
     }
 
-    if (this.state === 'walk' && this.target) {
+    if ((this.state === 'walk' || this.state === 'walkToRoof') && this.target) {
       const dx = this.target.x - this.x;
       const dy = this.target.y - this.y;
       const distance = Math.hypot(dx, dy);
       if (distance < 9 || this.stateTime <= 0) {
+        const roofTarget = this.roofTarget;
         this.target = null;
-        this.state = 'nap';
-        this.stateTime = rand(9, 22);
+        this.roofTarget = null;
+        if (!this.napOn(roofTarget)) {
+          this.state = 'nap';
+          this.stateTime = rand(9, 22);
+        }
       } else {
         const speed = 72;
         this.x += dx / distance * speed * dt;
@@ -104,10 +139,11 @@ export class Pet {
       if (this.state === 'dance' || this.state === 'stretch') {
         this.state = 'nap';
         this.stateTime = rand(8, 18);
-      } else if (Math.random() < 0.45) {
-        this.pickWanderTarget();
       } else {
-        this.stateTime = rand(7, 16);
+        const nextActivity = Math.random();
+        if (nextActivity < 0.28 && this.pickRoofTarget()) return;
+        if (nextActivity < 0.65) this.pickWanderTarget();
+        else this.stateTime = rand(7, 16);
       }
     }
   }
@@ -118,12 +154,13 @@ export class Pet {
     const y = roof ? roof.y - 52 : this.y;
     const sleeping = this.state === 'nap' || this.state === 'roofNap';
     const dance = this.state === 'dance';
-    const walkBob = this.state === 'walk' ? Math.sin(this.t * 13) * 5 : 0;
+    const walking = this.state === 'walk' || this.state === 'walkToRoof';
+    const walkBob = walking ? Math.sin(this.t * 13) * 5 : 0;
     const hop = this.bounce * 16 + (dance ? Math.max(0, Math.sin(this.t * 9)) * 18 : 0);
     const stretch = this.state === 'stretch' ? 1 + Math.sin(Math.min(1, 2.2 - this.stateTime) * Math.PI) * 0.32 : 1;
 
     const assets = this.game?.assets;
-    const pose = sleeping ? 'pet_sleep' : (this.state === 'walk' || dance) ? 'pet_walk' : 'pet_sit';
+    const pose = sleeping ? 'pet_sleep' : (walking || dance) ? 'pet_walk' : 'pet_sit';
     const sprite = assets?.get?.(pose);
     if (sprite) {
       const height = sleeping ? 66 : pose === 'pet_walk' ? 88 : 100;
