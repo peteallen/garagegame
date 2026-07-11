@@ -26,6 +26,9 @@ export class Garage {
       roadZone: { x: 0, y: 690, w: 245, h: 185 },
     };
     this.pickupBooth = { x: 1490, y: 600, w: 105, h: 160, hit: { x: 1430, y: 530, w: 170, h: 250 } };
+    // Keep service equipment off the playfield until its validated driving
+    // arcs and interactions are ready to ship together.
+    this.serviceStationsEnabled = false;
     // Bay geometry is measured from the painted building sprite (stall
     // openings at these centers/widths when drawn at rect 198,41,1070,561);
     // the procedural fallback draws at the same coordinates.
@@ -99,6 +102,7 @@ export class Garage {
   }
 
   hitStation(x, y) {
+    if (!this.serviceStationsEnabled) return null;
     return this.stations.find((station) => pointInRect(x, y, station.hit, 22)) || null;
   }
 
@@ -347,6 +351,9 @@ export class Garage {
     const ground = this.sprite('ground');
     if (ground) {
       ctx.drawImage(ground, 0, 0, WORLD_W, WORLD_H);
+      // Stars belong to the sky layer. Drawing them here keeps the garage,
+      // booth, and every other foreground prop in front of them.
+      if (night) this.drawStars(ctx);
       this.drawClouds(ctx, night);
     } else {
       this.drawSky(ctx, night);
@@ -355,16 +362,17 @@ export class Garage {
     this.drawBuilding(ctx, night);
     this.drawBays(ctx, night);
     this.drawEntrance(ctx, night);
-    this.drawStationsBase(ctx, night);
+    if (this.serviceStationsEnabled) this.drawStationsBase(ctx, night);
     this.drawBooth(ctx, night);
     this.drawAmbientDetails(ctx, night);
     if (night && ground) {
       // Painted world goes dark with one tint pass; vehicles draw after this
-      // so their lights stay bright. Stars sit above the tint.
+      // so their lights stay bright. The stars were already laid into the sky
+      // and remain behind the building instead of sparkling through its roof.
       ctx.fillStyle = 'rgba(13,26,62,.44)';
       ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-      this.drawStars(ctx);
     }
+    if (night) this.drawNightLighting(ctx);
   }
 
   drawForeground(ctx) {
@@ -380,8 +388,10 @@ export class Garage {
       roundRect(ctx, last.x + last.w / 2 - 8, 260, 20, 330, 9);
       ctx.fill();
     }
-    this.drawWashForeground(ctx);
-    this.drawLiftForeground(ctx);
+    if (this.serviceStationsEnabled) {
+      this.drawWashForeground(ctx);
+      this.drawLiftForeground(ctx);
+    }
   }
 
   drawSky(ctx, night) {
@@ -687,6 +697,85 @@ export class Garage {
     ctx.fillStyle = '#ca554a';
     roundRect(ctx, booth.x - 62, booth.y - 100, 124, 30, 12);
     ctx.fill();
+  }
+
+  drawNightLighting(ctx) {
+    const paintedBuilding = Boolean(this.sprite('building'));
+
+    // A soft ceiling wash makes every stall feel open and welcoming without
+    // painting over cars, which are rendered after the garage base layer.
+    const bayTop = paintedBuilding ? 246 : 270;
+    const bayBottom = paintedBuilding ? 578 : 576;
+    for (const bay of this.bays) {
+      const inset = paintedBuilding ? 14 : 16;
+      const left = bay.x - bay.w / 2 + inset;
+      const width = bay.w - inset * 2;
+      ctx.save();
+      roundRect(ctx, left, bayTop, width, bayBottom - bayTop, 12);
+      ctx.clip();
+      const wash = ctx.createLinearGradient(0, bayTop, 0, bayBottom);
+      wash.addColorStop(0, 'rgba(255,225,145,.28)');
+      wash.addColorStop(0.5, 'rgba(255,205,105,.11)');
+      wash.addColorStop(1, 'rgba(255,185,80,0)');
+      ctx.fillStyle = wash;
+      ctx.fillRect(left, bayTop, width, bayBottom - bayTop);
+      ctx.restore();
+
+      ctx.save();
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.shadowColor = 'rgba(255,211,112,.8)';
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = 'rgba(255,239,177,.72)';
+      roundRect(ctx, bay.x - Math.min(34, width * 0.22), bayTop + 11, Math.min(68, width * 0.44), 8, 4);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Relight the sign after the painted-world night tint. The broad halo and
+    // small hot cores match both the generated marquee and fallback fascia.
+    const sign = paintedBuilding
+      ? { x: 240, y: 66, w: 986, h: 78, first: 276, last: 1200, step: 43, cy: 105 }
+      : { x: 198, y: 158, w: 1070, h: 74, first: 254, last: 1230, step: 64, cy: 188 };
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.shadowColor = 'rgba(255,190,72,.75)';
+    ctx.shadowBlur = 28;
+    ctx.fillStyle = 'rgba(255,202,82,.12)';
+    roundRect(ctx, sign.x, sign.y, sign.w, sign.h, 30);
+    ctx.fill();
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = 'rgba(255,239,158,.76)';
+    for (let x = sign.first; x < sign.last; x += sign.step) {
+      ctx.beginPath();
+      ctx.arc(x, sign.cy, paintedBuilding ? 3.8 : 4.5, 0, TAU);
+      ctx.fill();
+    }
+    ctx.restore();
+
+    // The pickup booth's open window is the one human-scale pool of light in
+    // the yard. These bounds align with both the sprite opening and fallback.
+    const booth = this.pickupBooth;
+    const paintedBooth = Boolean(this.sprite('booth'));
+    const windowRect = paintedBooth
+      ? { x: booth.x - 36, y: booth.y - 64, w: 72, h: 76 }
+      : { x: booth.x - 37, y: booth.y - 55, w: 74, h: 54 };
+    ctx.save();
+    roundRect(ctx, windowRect.x, windowRect.y, windowRect.w, windowRect.h, 11);
+    ctx.clip();
+    const windowGlow = ctx.createRadialGradient(
+      booth.x,
+      windowRect.y + windowRect.h * 0.28,
+      2,
+      booth.x,
+      windowRect.y + windowRect.h * 0.4,
+      windowRect.w * 0.75,
+    );
+    windowGlow.addColorStop(0, 'rgba(255,239,164,.55)');
+    windowGlow.addColorStop(0.55, 'rgba(255,199,91,.24)');
+    windowGlow.addColorStop(1, 'rgba(255,177,72,0)');
+    ctx.fillStyle = windowGlow;
+    ctx.fillRect(windowRect.x, windowRect.y, windowRect.w, windowRect.h);
+    ctx.restore();
   }
 
   drawAmbientDetails(ctx, night) {

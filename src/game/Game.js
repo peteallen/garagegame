@@ -128,12 +128,18 @@ export class Game {
     if (this.dragVehicle) {
       const vehicle = this.dragVehicle;
       const bay = this.dragBay || this.garage.hitBay(point.x, point.y);
+      const station = bay ? null : this.garage.hitStation(point.x, point.y);
       this.dragVehicle = null;
       this.dragBay = null;
       this.pointer = null;
       if (bay && vehicle.status === 'waiting') this.parkVehicle(vehicle, bay);
       else if (bay && vehicle.status === 'parked' && vehicle.bayId !== bay.id) this.reparkVehicle(vehicle, bay);
-      else if (!bay && vehicle.status === 'parked' && this.garage.containsRoad(point.x, point.y)) {
+      else if (station && vehicle.status === 'parked') {
+        if (this.selectedVehicle && this.selectedVehicle !== vehicle) this.selectedVehicle.deselect();
+        this.selectedVehicle = vehicle;
+        vehicle.select();
+        this.tapStation(station);
+      } else if (!bay && vehicle.status === 'parked' && this.garage.containsRoad(point.x, point.y)) {
         this.sendVehicleOut(vehicle);
       } else {
         vehicle.select();
@@ -406,28 +412,11 @@ export class Game {
   }
 
   tapStation(station) {
-    const vehicle = this.selectedVehicle;
-    if (!vehicle || vehicle.status !== 'parked') {
-      this.sound.pop();
-      this.particles.sparkle(station.x, station.y, 7);
-      return;
-    }
-    if (station.id === 'wash') vehicle.care.washed = true;
-    if (station.id === 'charge') vehicle.care.charged = true;
-    if (station.id === 'air') vehicle.care.tires = true;
-    vehicle.bounce = 1;
-    station.active = vehicle.id;
-    window.setTimeout(() => { if (station.active === vehicle.id) station.active = null; }, 1800);
-    if (station.id === 'wash') this.particles.foam(vehicle.x, vehicle.y, 18);
-    else this.particles.sparkle(vehicle.x, vehicle.y - 25, 12);
-    const completionLine = {
-      wash: 'wash_done',
-      charge: 'charge_done',
-      air: 'air_done',
-    }[station.id];
-    if (completionLine) this.say(completionLine, vehicle);
-    this.sound.happy();
-    this.save();
+    // Service trips are not playable yet. If the hidden station art is enabled
+    // for layout work, it only gives neutral feedback instead of pretending a
+    // remote repair took place.
+    this.sound.pop();
+    this.particles.sparkle(station.x, station.y, 7);
   }
 
   removeVehicle(vehicle) {
@@ -649,7 +638,9 @@ export class Game {
     ctx.strokeStyle = '#ff4dc4';
     ctx.setLineDash([8, 6]);
     for (const bay of this.garage.bays) ctx.strokeRect(bay.hit.x, bay.hit.y, bay.hit.w, bay.hit.h);
-    for (const station of this.garage.stations) ctx.strokeRect(station.hit.x, station.hit.y, station.hit.w, station.hit.h);
+    if (this.garage.serviceStationsEnabled) {
+      for (const station of this.garage.stations) ctx.strokeRect(station.hit.x, station.hit.y, station.hit.w, station.hit.h);
+    }
     const booth = this.garage.pickupBooth.hit;
     ctx.strokeRect(booth.x, booth.y, booth.w, booth.h);
     const road = this.garage.entrance.roadZone;

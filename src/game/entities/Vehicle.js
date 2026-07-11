@@ -258,6 +258,10 @@ export class Vehicle {
     ctx.rotate(this.heading + boogie);
     ctx.scale(scale, scale);
 
+    if (!portrait && this.game?.isNight && (this.moving || this.problem || action?.name === 'headlights')) {
+      this.drawHeadlightCones(ctx);
+    }
+
     if (!portrait) {
       ctx.fillStyle = 'rgba(15,36,44,.22)';
       ctx.beginPath();
@@ -274,6 +278,41 @@ export class Vehicle {
 
   bodySprite(assets) {
     return assets?.get?.(`vehicle_${this.type}`) || null;
+  }
+
+  drawHeadlightCones(ctx) {
+    const { length, width } = this.config;
+    const front = length * 0.43;
+    const reach = Math.max(190, length * 0.95);
+    const end = front + reach;
+    const nearHalf = Math.max(8, width * 0.08);
+    const farHalf = Math.max(46, width * 0.38);
+    const action = this.surprise;
+    const alpha = this.problem
+      ? 0.25 + this.flash * 0.55
+      : action?.name === 'headlights' ? 0.72 : 0.56;
+    const glow = ctx.createLinearGradient(front, 0, end, 0);
+    glow.addColorStop(0, 'rgba(255,246,178,.58)');
+    glow.addColorStop(0.45, 'rgba(255,239,148,.24)');
+    glow.addColorStop(1, 'rgba(255,232,132,0)');
+
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    ctx.globalAlpha = alpha;
+    ctx.fillStyle = glow;
+    ctx.shadowColor = 'rgba(255,239,153,.32)';
+    ctx.shadowBlur = 16;
+    for (const side of [-1, 1]) {
+      const center = side * width * 0.27;
+      ctx.beginPath();
+      ctx.moveTo(front, center - nearHalf);
+      ctx.quadraticCurveTo(front + reach * 0.58, center - farHalf * 0.72, end, center - farHalf);
+      ctx.lineTo(end, center + farHalf);
+      ctx.quadraticCurveTo(front + reach * 0.58, center + farHalf * 0.72, front, center + nearHalf);
+      ctx.closePath();
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   // The generated sprite is only the painted body; wheels stay procedural
