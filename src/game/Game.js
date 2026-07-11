@@ -10,12 +10,15 @@ import { cubicPoint } from './core/VehicleMotion.js';
 import { clamp, dist, pick, roundRect, TAU } from './core/math.js';
 import { triggerVehicleSurprise } from './actions/vehicleSurprises.js';
 
+const SPLASH_DURATION = 4.2;
+
 export class Game {
   constructor(canvas, assets = null) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.assets = assets;
     this.time = 0;
+    this.splashTime = SPLASH_DURATION;
     this.isNight = false;
     this.selectedVehicle = null;
     this.pickupRequest = null;
@@ -54,6 +57,7 @@ export class Game {
     if (!previous) return;
     if (previous.sound?.ctx) this.sound.ctx = previous.sound.ctx;
     if (previous.sound) this.sound.muted = previous.sound.muted;
+    this.splashTime = 0; // no splash replay on hot swaps mid-session
   }
 
   resize() {
@@ -79,6 +83,7 @@ export class Game {
 
   onPointerDown(clientX, clientY) {
     this.sound.unlock();
+    this.splashTime = Math.min(this.splashTime, 0.45);
     const point = this.toWorld(clientX, clientY);
     const vehicle = this.vehicleAt(point.x, point.y);
     this.pointer = { start: point, point, time: performance.now(), vehicle };
@@ -138,6 +143,13 @@ export class Game {
       return;
     }
 
+    // Booth before stations: its hit zone overlaps the wash pad's padding and
+    // a pickup tap must never be eaten by a station.
+    if (this.garage.containsBooth(x, y)) {
+      this.requestPickup();
+      return;
+    }
+
     const station = this.garage.hitStation(x, y);
     if (station) {
       this.tapStation(station);
@@ -154,11 +166,6 @@ export class Game {
         this.sound.pop();
         this.particles.sparkle(bay.park.x, bay.park.y, 5);
       }
-      return;
-    }
-
-    if (this.garage.containsBooth(x, y)) {
-      this.requestPickup();
       return;
     }
 
@@ -386,6 +393,7 @@ export class Game {
 
   update(dt) {
     this.time += dt;
+    this.splashTime = Math.max(0, this.splashTime - dt);
     if (window.innerWidth !== this._lastW || window.innerHeight !== this._lastH) {
       this._lastW = window.innerWidth;
       this._lastH = window.innerHeight;
@@ -502,23 +510,39 @@ export class Game {
     ctx.closePath();
     ctx.fill();
     const vehicle = this.pickupRequest;
-    ctx.save();
-    ctx.rotate(-vehicle.heading);
-    const oldX = vehicle.x;
-    const oldY = vehicle.y;
-    const oldHeading = vehicle.heading;
-    vehicle.x = 0;
-    vehicle.y = 0;
-    vehicle.heading = 0;
-    vehicle.draw(ctx, this.assets, { portrait: true, scale: 0.85 });
-    vehicle.x = oldX;
-    vehicle.y = oldY;
-    vehicle.heading = oldHeading;
-    ctx.restore();
+    const beauty = this.assets?.get?.(`portrait_${vehicle.type}`);
+    if (beauty) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(0, 0, 92, 0, TAU);
+      ctx.clip();
+      ctx.drawImage(beauty, -92, -92, 184, 184);
+      ctx.restore();
+    } else {
+      ctx.save();
+      ctx.rotate(-vehicle.heading);
+      const oldX = vehicle.x;
+      const oldY = vehicle.y;
+      const oldHeading = vehicle.heading;
+      vehicle.x = 0;
+      vehicle.y = 0;
+      vehicle.heading = 0;
+      vehicle.draw(ctx, this.assets, { portrait: true, scale: 0.85 });
+      vehicle.x = oldX;
+      vehicle.y = oldY;
+      vehicle.heading = oldHeading;
+      ctx.restore();
+    }
     ctx.restore();
   }
 
   drawTitle(ctx) {
+    // The painted building carries the branding; the logo appears as a brief
+    // startup splash instead of floating text.
+    if (this.assets?.get?.('building')) {
+      this.drawSplash(ctx);
+      return;
+    }
     ctx.save();
     ctx.translate(760, 95 + Math.sin(this.time * 1.7) * 3);
     ctx.textAlign = 'center';
@@ -529,6 +553,25 @@ export class Game {
     ctx.strokeText('BEEP BEEP GARAGE!', 0, 0);
     ctx.fillStyle = '#fff1a8';
     ctx.fillText('BEEP BEEP GARAGE!', 0, 0);
+    ctx.restore();
+  }
+
+  drawSplash(ctx) {
+    if (this.splashTime <= 0) return;
+    const logo = this.assets?.get?.('title_logo');
+    if (!logo) return;
+    const appear = clamp((SPLASH_DURATION - this.splashTime) / 0.45, 0, 1);
+    const fade = clamp(this.splashTime / 0.6, 0, 1);
+    const alpha = Math.min(appear, fade);
+    if (alpha <= 0.01) return;
+    const width = 660 + Math.sin(this.time * 1.9) * 8;
+    const height = width * (logo.height / logo.width);
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.shadowColor = 'rgba(16,32,48,.45)';
+    ctx.shadowBlur = 30;
+    ctx.shadowOffsetY = 10;
+    ctx.drawImage(logo, 800 - width / 2, 300 - height / 2 - (1 - appear) * 40, width, height);
     ctx.restore();
   }
 

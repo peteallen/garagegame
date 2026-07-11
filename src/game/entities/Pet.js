@@ -122,6 +122,28 @@ export class Pet {
     const hop = this.bounce * 16 + (dance ? Math.max(0, Math.sin(this.t * 9)) * 18 : 0);
     const stretch = this.state === 'stretch' ? 1 + Math.sin(Math.min(1, 2.2 - this.stateTime) * Math.PI) * 0.32 : 1;
 
+    const assets = this.game?.assets;
+    const pose = sleeping ? 'pet_sleep' : (this.state === 'walk' || dance) ? 'pet_walk' : 'pet_sit';
+    const sprite = assets?.get?.(pose);
+    if (sprite) {
+      const height = sleeping ? 66 : pose === 'pet_walk' ? 88 : 100;
+      const width = height * (sprite.width / sprite.height);
+      ctx.save();
+      ctx.translate(x, y - hop + walkBob);
+      if (roof) ctx.rotate(roof.heading - Math.PI / 2);
+      ctx.scale(this.heading * stretch, 1 / Math.sqrt(stretch));
+      if (!roof) {
+        ctx.fillStyle = 'rgba(24,40,45,.2)';
+        ctx.beginPath();
+        ctx.ellipse(0, 26 + hop, width * 0.52, 13, 0, 0, TAU);
+        ctx.fill();
+      }
+      ctx.drawImage(sprite, -width / 2, 28 - height, width, height);
+      ctx.restore();
+      if (sleeping && !dance) this.drawSnoreZs(ctx, x, y);
+      return;
+    }
+
     ctx.save();
     ctx.translate(x, y - hop + walkBob);
     if (roof) ctx.rotate(roof.heading - Math.PI / 2);
@@ -190,14 +212,16 @@ export class Pet {
     }
     ctx.restore();
 
-    if (sleeping && !dance) {
-      ctx.save();
-      ctx.fillStyle = 'rgba(255,255,255,.8)';
-      ctx.font = '700 27px ui-rounded, sans-serif';
-      ctx.fillText('Z', x + 38, y - 48 + Math.sin(this.t * 2) * 5);
-      ctx.font = '700 19px ui-rounded, sans-serif';
-      ctx.fillText('z', x + 65, y - 67 + Math.sin(this.t * 2 + 1) * 4);
-      ctx.restore();
-    }
+    if (sleeping && !dance) this.drawSnoreZs(ctx, x, y);
+  }
+
+  drawSnoreZs(ctx, x, y) {
+    ctx.save();
+    ctx.fillStyle = 'rgba(255,255,255,.8)';
+    ctx.font = '700 27px ui-rounded, sans-serif';
+    ctx.fillText('Z', x + 38, y - 48 + Math.sin(this.t * 2) * 5);
+    ctx.font = '700 19px ui-rounded, sans-serif';
+    ctx.fillText('z', x + 65, y - 67 + Math.sin(this.t * 2 + 1) * 4);
+    ctx.restore();
   }
 }

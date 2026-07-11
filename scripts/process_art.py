@@ -58,6 +58,14 @@ VEHICLES = {
 
 # name -> (aspect w/h or None to keep trim aspect, max long side, key color)
 SPRITES = {
+    "building": (None, 1400, "green"),
+    "wash": (None, 700, "green"),
+    "charge": (None, 420, "green"),
+    "air": (None, 420, "green"),
+    "lift": (None, 640, "green"),
+    "booth": (None, 520, "green"),
+    "door": (None, 560, "green"),
+    "bell": (None, 300, "green"),
     "title_logo": (None, 1100, "green"),
     "pet_sit": (None, 320, "green"),
     "pet_walk": (None, 320, "green"),
@@ -152,7 +160,27 @@ def trim_pad(img: Image.Image, aspect, max_side: int, pad_frac=0.03) -> Image.Im
     return canvas
 
 
+def process_ground():
+    """Full-bleed opaque backdrop: cover-crop the render to the world size."""
+    src = RAW / "ground.png"
+    if not src.exists():
+        print("ground: missing raw render, skip")
+        return
+    img = Image.open(src).convert("RGB")
+    tw, th = 1600, 900
+    scale = max(tw / img.width, th / img.height)
+    img = img.resize((round(img.width * scale), round(img.height * scale)), Image.LANCZOS)
+    x = (img.width - tw) // 2
+    y = (img.height - th) // 2
+    img = img.crop((x, y, x + tw, y + th))
+    img.save(OUT / "ground.jpg", quality=88, optimize=True)
+    print(f"ground: OK {img.size}")
+
+
 def process(name: str) -> bool:
+    if name == "ground":
+        process_ground()
+        return True
     src = RAW / f"{name}.png"
     if not src.exists():
         print(f"{name}: missing raw render, skip")
@@ -181,7 +209,8 @@ def main():
     names = sys.argv[1:]
     if not names:
         names = [p.stem for p in sorted(RAW.glob("*.png"))
-                 if p.stem in VEHICLES or p.stem in SPRITES or p.stem in PORTRAITS]
+                 if p.stem in VEHICLES or p.stem in SPRITES or p.stem in PORTRAITS
+                 or p.stem == "ground"]
     for name in names:
         process(name)
 

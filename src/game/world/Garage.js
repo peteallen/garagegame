@@ -26,11 +26,14 @@ export class Garage {
       roadZone: { x: 0, y: 690, w: 245, h: 185 },
     };
     this.pickupBooth = { x: 1490, y: 600, w: 105, h: 160, hit: { x: 1430, y: 530, w: 170, h: 250 } };
+    // Bay geometry is measured from the painted building sprite (stall
+    // openings at these centers/widths when drawn at rect 198,41,1070,561);
+    // the procedural fallback draws at the same coordinates.
     this.bays = [
-      makeBay('bay-a', 350, 174, false),
-      makeBay('bay-b', 550, 174, false),
-      makeBay('bay-c', 750, 174, false),
-      makeBay('big-bay', 1025, 286, true),
+      makeBay('bay-a', 368, 174, false),
+      makeBay('bay-b', 597, 174, false),
+      makeBay('bay-c', 823, 174, false),
+      makeBay('big-bay', 1075, 219, true),
     ];
     this.stations = [
       makeStation('wash', 1360, 600, 250, 174, '#64c9dc', 4.4),
@@ -39,9 +42,14 @@ export class Garage {
       makeStation('lift', 1288, 828, 270, 104, '#da8066', 4.8),
     ];
     this.obstacles = [
-      { id: 'building-left', x: 236, y: 170, w: 10, h: 410 },
+      { id: 'building-left', x: 198, y: 223, w: 83, h: 380 },
+      { id: 'building-right', x: 1185, y: 223, w: 83, h: 380 },
       { id: 'wash-wall', x: 1228, y: 210, w: 12, h: 380 },
-      ...this.bays.slice(0, -1).map((bay) => ({ id: `${bay.id}-pillar`, x: bay.x + bay.w / 2 + 8, y: 255, w: 20, h: 330 })),
+      ...this.bays.slice(0, -1).map((bay, index) => {
+        const next = this.bays[index + 1];
+        const left = bay.x + bay.w / 2;
+        return { id: `divider-${bay.id}`, x: left, y: 223, w: next.x - next.w / 2 - left, h: 380 };
+      }),
     ];
   }
 
@@ -305,29 +313,48 @@ export class Garage {
     return path;
   }
 
+  sprite(name) {
+    return this.game.assets?.get?.(name) || null;
+  }
+
   drawBase(ctx) {
     const night = this.game.isNight;
-    this.drawSky(ctx, night);
-    this.drawGround(ctx, night);
+    const ground = this.sprite('ground');
+    if (ground) {
+      ctx.drawImage(ground, 0, 0, WORLD_W, WORLD_H);
+      this.drawClouds(ctx, night);
+    } else {
+      this.drawSky(ctx, night);
+      this.drawGround(ctx, night);
+    }
     this.drawBuilding(ctx, night);
     this.drawBays(ctx, night);
     this.drawEntrance(ctx, night);
     this.drawStationsBase(ctx, night);
     this.drawBooth(ctx, night);
     this.drawAmbientDetails(ctx, night);
+    if (night && ground) {
+      // Painted world goes dark with one tint pass; vehicles draw after this
+      // so their lights stay bright. Stars sit above the tint.
+      ctx.fillStyle = 'rgba(13,26,62,.44)';
+      ctx.fillRect(0, 0, WORLD_W, WORLD_H);
+      this.drawStars(ctx);
+    }
   }
 
   drawForeground(ctx) {
     const night = this.game.isNight;
-    ctx.fillStyle = night ? '#304955' : '#315866';
-    for (const bay of this.bays) {
-      const x = bay.x - bay.w / 2 - 12;
-      roundRect(ctx, x, 260, 20, 330, 9);
+    if (!this.sprite('building')) {
+      ctx.fillStyle = night ? '#304955' : '#315866';
+      for (const bay of this.bays) {
+        const x = bay.x - bay.w / 2 - 12;
+        roundRect(ctx, x, 260, 20, 330, 9);
+        ctx.fill();
+      }
+      const last = this.bays.at(-1);
+      roundRect(ctx, last.x + last.w / 2 - 8, 260, 20, 330, 9);
       ctx.fill();
     }
-    const last = this.bays.at(-1);
-    roundRect(ctx, last.x + last.w / 2 - 8, 260, 20, 330, 9);
-    ctx.fill();
     this.drawWashForeground(ctx);
     this.drawLiftForeground(ctx);
   }
@@ -338,15 +365,21 @@ export class Garage {
     sky.addColorStop(1, night ? '#486282' : '#d8f3ea');
     ctx.fillStyle = sky;
     ctx.fillRect(0, 0, WORLD_W, WORLD_H);
-    if (night) {
-      ctx.fillStyle = 'rgba(255,244,180,.9)';
-      for (let index = 0; index < 38; index++) {
-        const x = (index * 197 + 43) % WORLD_W;
-        const y = 28 + (index * 83) % 235;
-        const size = index % 5 === 0 ? 3 : 1.6;
-        ctx.fillRect(x, y, size, size);
-      }
+    if (night) this.drawStars(ctx);
+    this.drawClouds(ctx, night);
+  }
+
+  drawStars(ctx) {
+    ctx.fillStyle = 'rgba(255,244,180,.9)';
+    for (let index = 0; index < 38; index++) {
+      const x = (index * 197 + 43) % WORLD_W;
+      const y = 28 + (index * 83) % 235;
+      const size = index % 5 === 0 ? 3 : 1.6;
+      ctx.fillRect(x, y, size, size);
     }
+  }
+
+  drawClouds(ctx, night) {
     for (let index = 0; index < 3; index++) {
       const x = ((index * 620 + 140 + this.cloudOffset * (0.6 + index * 0.15)) % 1900) - 180;
       const y = 85 + index * 55;
@@ -382,6 +415,26 @@ export class Garage {
   }
 
   drawBuilding(ctx, night) {
+    const sprite = this.sprite('building');
+    if (sprite) {
+      ctx.save();
+      ctx.shadowColor = 'rgba(17,32,39,.25)';
+      ctx.shadowBlur = 24;
+      ctx.shadowOffsetY = 14;
+      ctx.drawImage(sprite, 198, 41, 1070, 561);
+      ctx.restore();
+      if (this.signFlicker > 0.02 || night) {
+        // Warm glow over the painted bulb strip: flicker on demand, steady at night.
+        ctx.save();
+        ctx.globalAlpha = night ? 0.28 + this.signFlicker * 0.4 : this.signFlicker * 0.55;
+        ctx.fillStyle = '#ffde7a';
+        ctx.globalCompositeOperation = 'lighter';
+        roundRect(ctx, 240, 66, 986, 78, 34);
+        ctx.fill();
+        ctx.restore();
+      }
+      return;
+    }
     ctx.save();
     ctx.shadowColor = 'rgba(17,32,39,.28)';
     ctx.shadowBlur = 26;
@@ -403,33 +456,36 @@ export class Garage {
   }
 
   drawBays(ctx, night) {
+    const painted = Boolean(this.sprite('building'));
     for (const bay of this.bays) {
-      ctx.fillStyle = night ? '#182b3d' : '#264752';
-      roundRect(ctx, bay.x - bay.w / 2, 255, bay.w, 335, 18);
-      ctx.fill();
-      const inner = ctx.createLinearGradient(0, 270, 0, 580);
-      inner.addColorStop(0, night ? '#26394b' : '#3f6670');
-      inner.addColorStop(1, night ? '#172b39' : '#294955');
-      ctx.fillStyle = inner;
-      roundRect(ctx, bay.x - bay.w / 2 + 12, 270, bay.w - 24, 306, 12);
-      ctx.fill();
-      ctx.strokeStyle = night ? 'rgba(255,224,132,.34)' : 'rgba(255,238,175,.32)';
-      ctx.lineWidth = 5;
-      ctx.setLineDash([18, 14]);
-      ctx.beginPath();
-      ctx.moveTo(bay.x, 565);
-      ctx.lineTo(bay.x, 455);
-      ctx.stroke();
-      ctx.setLineDash([]);
+      if (!painted) {
+        ctx.fillStyle = night ? '#182b3d' : '#264752';
+        roundRect(ctx, bay.x - bay.w / 2, 255, bay.w, 335, 18);
+        ctx.fill();
+        const inner = ctx.createLinearGradient(0, 270, 0, 580);
+        inner.addColorStop(0, night ? '#26394b' : '#3f6670');
+        inner.addColorStop(1, night ? '#172b39' : '#294955');
+        ctx.fillStyle = inner;
+        roundRect(ctx, bay.x - bay.w / 2 + 12, 270, bay.w - 24, 306, 12);
+        ctx.fill();
+        ctx.strokeStyle = night ? 'rgba(255,224,132,.34)' : 'rgba(255,238,175,.32)';
+        ctx.lineWidth = 5;
+        ctx.setLineDash([18, 14]);
+        ctx.beginPath();
+        ctx.moveTo(bay.x, 565);
+        ctx.lineTo(bay.x, 455);
+        ctx.stroke();
+        ctx.setLineDash([]);
+      }
       ctx.fillStyle = bay.large ? '#f1b648' : '#8ed0c4';
       ctx.beginPath();
-      ctx.arc(bay.x, 290, 11, 0, TAU);
+      ctx.arc(bay.x, painted ? 205 : 290, painted ? 9 : 11, 0, TAU);
       ctx.fill();
       if (this.game.dragBay?.id === bay.id) {
         ctx.strokeStyle = '#ffeb72';
         ctx.lineWidth = 10;
         ctx.globalAlpha = 0.75 + Math.sin(this.game.time * 8) * 0.18;
-        roundRect(ctx, bay.x - bay.w / 2 + 6, 265, bay.w - 12, 316, 14);
+        roundRect(ctx, bay.x - bay.w / 2 + 6, painted ? 232 : 265, bay.w - 12, painted ? 356 : 316, 14);
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
@@ -437,80 +493,119 @@ export class Garage {
   }
 
   drawEntrance(ctx, night) {
-    ctx.fillStyle = night ? '#254052' : '#315967';
-    roundRect(ctx, 14, 500, 225, 245, 30);
-    ctx.fill();
-    ctx.fillStyle = night ? '#142a3b' : '#25444f';
-    roundRect(ctx, 26, 518, 200, 215, 22);
-    ctx.fill();
-
-    const doorHeight = 190 * (1 - this.doorOpen);
-    if (doorHeight > 2) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(32, 524, 188, doorHeight);
-      ctx.clip();
-      for (let y = 528; y < 724; y += 27) {
-        ctx.fillStyle = (Math.floor(y / 27) % 2) ? '#75aebb' : '#86bdc7';
-        roundRect(ctx, 34, y, 184, 22, 4);
-        ctx.fill();
+    const doorSprite = this.sprite('door');
+    if (doorSprite) {
+      // Painted frame with an open interior; the animated slats draw inside
+      // the interior region measured from the art.
+      const width = 296;
+      const height = width * (doorSprite.height / doorSprite.width);
+      ctx.drawImage(doorSprite, 8, 745 - height, width, height);
+      const slat = { x: 52, y: 546, w: 210, h: 178 };
+      const doorHeight = slat.h * (1 - this.doorOpen);
+      if (doorHeight > 2) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(slat.x, slat.y, slat.w, doorHeight);
+        ctx.clip();
+        for (let y = slat.y; y < slat.y + slat.h + 26; y += 26) {
+          ctx.fillStyle = (Math.floor(y / 26) % 2) ? '#75aebb' : '#86bdc7';
+          roundRect(ctx, slat.x + 2, y, slat.w - 4, 21, 4);
+          ctx.fill();
+        }
+        ctx.restore();
       }
-      ctx.restore();
+    } else {
+      ctx.fillStyle = night ? '#254052' : '#315967';
+      roundRect(ctx, 14, 500, 225, 245, 30);
+      ctx.fill();
+      ctx.fillStyle = night ? '#142a3b' : '#25444f';
+      roundRect(ctx, 26, 518, 200, 215, 22);
+      ctx.fill();
+
+      const doorHeight = 190 * (1 - this.doorOpen);
+      if (doorHeight > 2) {
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(32, 524, 188, doorHeight);
+        ctx.clip();
+        for (let y = 528; y < 724; y += 27) {
+          ctx.fillStyle = (Math.floor(y / 27) % 2) ? '#75aebb' : '#86bdc7';
+          roundRect(ctx, 34, y, 184, 22, 4);
+          ctx.fill();
+        }
+        ctx.restore();
+      }
     }
-    ctx.fillStyle = '#ffd860';
-    ctx.beginPath();
-    ctx.arc(this.entrance.bell.x, this.entrance.bell.y, this.entrance.bell.r, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#d85346';
-    ctx.beginPath();
-    ctx.arc(this.entrance.bell.x, this.entrance.bell.y, 46, 0, TAU);
-    ctx.fill();
-    ctx.fillStyle = '#fff4c9';
-    ctx.beginPath();
-    ctx.arc(this.entrance.bell.x, this.entrance.bell.y, 14, 0, TAU);
-    ctx.fill();
+
+    const bell = this.entrance.bell;
+    const bellSprite = this.sprite('bell');
+    if (bellSprite) {
+      const size = bell.r * 2 + 8;
+      ctx.drawImage(bellSprite, bell.x - size / 2, bell.y - size / 2, size, size);
+    } else {
+      ctx.fillStyle = '#ffd860';
+      ctx.beginPath();
+      ctx.arc(bell.x, bell.y, bell.r, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#d85346';
+      ctx.beginPath();
+      ctx.arc(bell.x, bell.y, 46, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#fff4c9';
+      ctx.beginPath();
+      ctx.arc(bell.x, bell.y, 14, 0, TAU);
+      ctx.fill();
+    }
     const pulse = (this.game.time * 1.5) % 1;
     ctx.strokeStyle = 'rgba(255,255,255,.85)';
     ctx.lineWidth = 7;
     ctx.globalAlpha = 1 - pulse;
     ctx.beginPath();
-    ctx.arc(this.entrance.bell.x, this.entrance.bell.y, 78 + pulse * 28, -0.7, 0.7);
+    ctx.arc(bell.x, bell.y, 78 + pulse * 28, -0.7, 0.7);
     ctx.stroke();
     ctx.globalAlpha = 1;
   }
 
   drawStationsBase(ctx, night) {
     const wash = this.stationById('wash');
-    ctx.fillStyle = night ? '#254355' : '#dce9d8';
-    roundRect(ctx, wash.x - wash.w / 2, wash.y - wash.h / 2 - 112, wash.w, wash.h + 112, 28);
-    ctx.fill();
-    ctx.fillStyle = '#62c8d7';
-    roundRect(ctx, wash.x - wash.w / 2 + 12, wash.y - wash.h / 2 - 100, wash.w - 24, 58, 19);
-    ctx.fill();
-    ctx.fillStyle = '#ffffff';
-    for (let index = 0; index < 3; index++) {
-      ctx.beginPath();
-      ctx.arc(wash.x - 50 + index * 50, wash.y - wash.h / 2 - 71, 11, 0, TAU);
+    const washSprite = this.sprite('wash');
+    if (washSprite) {
+      drawAnchored(ctx, washSprite, wash.x, wash.y + wash.h / 2 + 4, 292);
+    } else {
+      ctx.fillStyle = night ? '#254355' : '#dce9d8';
+      roundRect(ctx, wash.x - wash.w / 2, wash.y - wash.h / 2 - 112, wash.w, wash.h + 112, 28);
+      ctx.fill();
+      ctx.fillStyle = '#62c8d7';
+      roundRect(ctx, wash.x - wash.w / 2 + 12, wash.y - wash.h / 2 - 100, wash.w - 24, 58, 19);
+      ctx.fill();
+      ctx.fillStyle = '#ffffff';
+      for (let index = 0; index < 3; index++) {
+        ctx.beginPath();
+        ctx.arc(wash.x - 50 + index * 50, wash.y - wash.h / 2 - 71, 11, 0, TAU);
+        ctx.fill();
+      }
+      ctx.fillStyle = night ? '#203846' : '#314f59';
+      roundRect(ctx, wash.x - wash.w / 2 + 18, wash.y - wash.h / 2 - 32, wash.w - 36, wash.h + 22, 18);
       ctx.fill();
     }
-    ctx.fillStyle = night ? '#203846' : '#314f59';
-    roundRect(ctx, wash.x - wash.w / 2 + 18, wash.y - wash.h / 2 - 32, wash.w - 36, wash.h + 22, 18);
-    ctx.fill();
 
-    const charge = this.stationById('charge');
-    drawServicePad(ctx, charge, 'charge', night);
-    const air = this.stationById('air');
-    drawServicePad(ctx, air, 'air', night);
-    const lift = this.stationById('lift');
-    drawServicePad(ctx, lift, 'lift', night);
+    const stationSprites = { charge: 158, air: 172, lift: 288 };
+    for (const [id, width] of Object.entries(stationSprites)) {
+      const station = this.stationById(id);
+      const sprite = this.sprite(id);
+      if (sprite) drawAnchored(ctx, sprite, station.x, station.y + station.h / 2 + 8, width);
+      else drawServicePad(ctx, station, id, night);
+    }
   }
 
   drawWashForeground(ctx) {
     const wash = this.stationById('wash');
+    const painted = Boolean(this.sprite('wash'));
     const active = Boolean(wash.active);
+    if (painted && !active) return;
     for (const side of [-1, 1]) {
       ctx.save();
-      ctx.translate(wash.x + side * (wash.w / 2 - 32), wash.y + 5);
+      ctx.translate(wash.x + side * (painted ? 88 : wash.w / 2 - 32), wash.y + (painted ? -18 : 5));
       ctx.rotate(active ? this.game.time * 5 * side : 0);
       ctx.strokeStyle = side < 0 ? '#ef6680' : '#55c9d0';
       ctx.lineWidth = 20;
@@ -528,14 +623,17 @@ export class Garage {
       ctx.fill();
       ctx.restore();
     }
-    ctx.fillStyle = '#76d4df';
-    roundRect(ctx, wash.x - wash.w / 2 - 8, wash.y - wash.h / 2 - 12, 22, wash.h + 42, 8);
-    ctx.fill();
-    roundRect(ctx, wash.x + wash.w / 2 - 14, wash.y - wash.h / 2 - 12, 22, wash.h + 42, 8);
-    ctx.fill();
+    if (!painted) {
+      ctx.fillStyle = '#76d4df';
+      roundRect(ctx, wash.x - wash.w / 2 - 8, wash.y - wash.h / 2 - 12, 22, wash.h + 42, 8);
+      ctx.fill();
+      roundRect(ctx, wash.x + wash.w / 2 - 14, wash.y - wash.h / 2 - 12, 22, wash.h + 42, 8);
+      ctx.fill();
+    }
   }
 
   drawLiftForeground(ctx) {
+    if (this.sprite('lift')) return;
     const lift = this.stationById('lift');
     ctx.fillStyle = '#d76c58';
     roundRect(ctx, lift.x - lift.w / 2 + 14, lift.y - 58, 20, 94, 8);
@@ -546,6 +644,11 @@ export class Garage {
 
   drawBooth(ctx, night) {
     const booth = this.pickupBooth;
+    const sprite = this.sprite('booth');
+    if (sprite) {
+      drawAnchored(ctx, sprite, booth.x, booth.y + booth.h / 2 + 6, 150);
+      return;
+    }
     ctx.fillStyle = night ? '#593e4d' : '#da795f';
     roundRect(ctx, booth.x - booth.w / 2, booth.y - booth.h / 2, booth.w, booth.h, 18);
     ctx.fill();
@@ -578,12 +681,12 @@ function makeBay(id, x, w, large) {
   return {
     id,
     x,
-    y: 420,
+    y: 408,
     w,
-    h: 335,
+    h: 370,
     large,
     park: { x, y: 455, heading: Math.PI / 2 },
-    hit: { x: x - w / 2, y: 250, w, h: 355 },
+    hit: { x: x - w / 2, y: 230, w, h: 375 },
   };
 }
 
@@ -614,6 +717,11 @@ function straight(p0, p3, speed, extras = {}) {
     speed,
     ...extras,
   };
+}
+
+function drawAnchored(ctx, img, centerX, bottomY, width) {
+  const height = width * (img.height / img.width);
+  ctx.drawImage(img, centerX - width / 2, bottomY - height, width, height);
 }
 
 function drawCloud(ctx, x, y, scale) {
