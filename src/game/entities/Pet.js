@@ -1,4 +1,9 @@
-import { damp, dist, rand, roundRect, TAU } from '../core/math.js';
+import { orientedFootprint } from '../core/VehicleMotion.js';
+import { damp, rand, roundRect, TAU } from '../core/math.js';
+
+const TRAFFIC_LANE_Y = 640;
+const TRAFFIC_REFUGE = Object.freeze({ x: 1300, y: 565 });
+const TRAFFIC_SPEED = 360;
 
 export class Pet {
   constructor(game, data = {}) {
@@ -13,6 +18,11 @@ export class Pet {
     this.bounce = 0;
     this.roofCar = null;
     this.roofTarget = null;
+    this.trafficHold = false;
+    this.trafficSafe = false;
+    this.trafficWaypoints = [];
+    this.trafficDismount = null;
+    this.pendingDance = 0;
   }
 
   get baseline() {
@@ -25,7 +35,19 @@ export class Pet {
     return Math.hypot(x - px, y - py) < 70;
   }
 
+  footprint(padding = 0) {
+    const x = this.roofCar ? this.roofCar.x - 8 : this.x - 8;
+    const y = this.roofCar ? this.roofCar.y - 58 : this.y - 6;
+    return orientedFootprint(x, y, 0, 150, 110, padding);
+  }
+
   onTap() {
+    if (this.trafficHold) {
+      this.bounce = 1;
+      this.game?.playSfx?.('cat_chirp', () => this.game.sound.catChirp());
+      this.game?.particles?.hearts?.(this.x, this.y - 55, 3);
+      return;
+    }
     if (this.roofCar) {
       this.game?.playSfx?.('cat_chirp', () => this.game.sound.catChirp());
       this.game?.particles?.hearts?.(this.roofCar.x, this.roofCar.y - 80, 4);
@@ -42,6 +64,10 @@ export class Pet {
   }
 
   dance(duration = 4) {
+    if (this.trafficHold) {
+      this.pendingDance = Math.max(this.pendingDance, duration);
+      return;
+    }
     this.dismountToFloor();
     this.state = 'dance';
     this.stateTime = duration;
@@ -58,7 +84,7 @@ export class Pet {
   }
 
   napOn(vehicle) {
-    if (!vehicle || vehicle.moving || vehicle.status !== 'parked') return false;
+    if (this.trafficHold || !vehicle || vehicle.moving || vehicle.status !== 'parked') return false;
     this.roofCar = vehicle;
     this.roofTarget = null;
     this.target = null;
@@ -68,6 +94,7 @@ export class Pet {
   }
 
   idleCharm() {
+    if (this.trafficHold) return;
     if (this.state === 'nap') {
       this.state = 'stretch';
       this.stateTime = 2.4;
@@ -77,6 +104,7 @@ export class Pet {
   }
 
   pickRoofTarget() {
+    if (this.trafficHold) return false;
     const parked = this.game?.vehicles?.filter((vehicle) =>
       vehicle.status === 'parked' && !vehicle.moving && !vehicle.problem
     ) || [];
@@ -94,17 +122,123 @@ export class Pet {
   }
 
   pickWanderTarget() {
+    if (this.trafficHold) return false;
     const bounds = this.game?.garage?.petBounds || { minX: 260, maxX: 1380, minY: 560, maxY: 710 };
     this.roofTarget = null;
     this.target = { x: rand(bounds.minX, bounds.maxX), y: rand(bounds.minY, bounds.maxY) };
     this.state = 'walk';
     this.stateTime = 12;
+    return true;
+  }
+
+  clearForTraffic() {
+    if (this.trafficHold) return;
+    this.trafficHold = true;
+    this.trafficSafe = false;
+    if (this.roofCar) {
+      const car = this.roofCar;
+      this.trafficDismount = {
+        elapsed: 0,
+        duration: 0.55,
+        startX: car.x,
+        startY: car.y - 52,
+        endX: Math.min(TRAFFIC_REFUGE.x, car.x + 140),
+        endY: TRAFFIC_LANE_Y,
+      };
+      this.x = this.trafficDismount.startX;
+      this.y = this.trafficDismount.startY;
+      this.roofCar = null;
+    }
+    this.roofTarget = null;
+    this.target = null;
+    if (Math.hypot(this.x - TRAFFIC_REFUGE.x, this.y - TRAFFIC_REFUGE.y) < 10) {
+      this.x = TRAFFIC_REFUGE.x;
+      this.y = TRAFFIC_REFUGE.y;
+      this.state = 'trafficSafe';
+      this.trafficSafe = true;
+      this.trafficWaypoints = [];
+      return;
+    }
+    this.trafficWaypoints = this.trafficDismount
+      ? []
+      : [
+          { x: this.x, y: TRAFFIC_LANE_Y },
+          { x: TRAFFIC_REFUGE.x, y: TRAFFIC_LANE_Y },
+          { ...TRAFFIC_REFUGE },
+        ];
+    this.state = 'trafficClear';
+    this.stateTime = 12;
+  }
+
+  releaseTraffic() {
+    if (!this.trafficHold) return;
+    this.trafficHold = false;
+    this.trafficSafe = false;
+    this.trafficWaypoints = [];
+    this.trafficDismount = null;
+    this.target = null;
+    if (this.pendingDance > 0) {
+      const duration = this.pendingDance;
+      this.pendingDance = 0;
+      this.state = 'dance';
+      this.stateTime = duration;
+    } else {
+      this.state = 'nap';
+      this.stateTime = rand(7, 14);
+    }
+  }
+
+  updateTrafficClearance(dt) {
+    if (this.trafficDismount) {
+      const hop = this.trafficDismount;
+      hop.elapsed = Math.min(hop.duration, hop.elapsed + dt);
+      const progress = hop.elapsed / hop.duration;
+      this.x = hop.startX + (hop.endX - hop.startX) * progress;
+      this.y = hop.startY + (hop.endY - hop.startY) * progress - Math.sin(progress * Math.PI) * 48;
+      this.heading = hop.endX >= hop.startX ? 1 : -1;
+      if (progress >= 1) {
+        this.x = hop.endX;
+        this.y = hop.endY;
+        this.trafficDismount = null;
+        this.trafficWaypoints = [
+          { x: TRAFFIC_REFUGE.x, y: TRAFFIC_LANE_Y },
+          { ...TRAFFIC_REFUGE },
+        ];
+      }
+      return;
+    }
+    while (this.trafficWaypoints.length) {
+      const target = this.trafficWaypoints[0];
+      const dx = target.x - this.x;
+      const dy = target.y - this.y;
+      const distance = Math.hypot(dx, dy);
+      if (distance < 6) {
+        this.x = target.x;
+        this.y = target.y;
+        this.trafficWaypoints.shift();
+        continue;
+      }
+      const step = Math.min(distance, TRAFFIC_SPEED * dt);
+      this.x += dx / distance * step;
+      this.y += dy / distance * step;
+      if (Math.abs(dx) > 1) this.heading = dx >= 0 ? 1 : -1;
+      return;
+    }
+    this.x = TRAFFIC_REFUGE.x;
+    this.y = TRAFFIC_REFUGE.y;
+    this.state = 'trafficSafe';
+    this.trafficSafe = true;
   }
 
   update(dt) {
     this.t += dt;
     this.stateTime -= dt;
     this.bounce = damp(this.bounce, 0, 6, dt);
+
+    if (this.trafficHold) {
+      this.updateTrafficClearance(dt);
+      return;
+    }
 
     if (this.roofCar) {
       this.x = this.roofCar.x;
@@ -154,7 +288,7 @@ export class Pet {
     const y = roof ? roof.y - 52 : this.y;
     const sleeping = this.state === 'nap' || this.state === 'roofNap';
     const dance = this.state === 'dance';
-    const walking = this.state === 'walk' || this.state === 'walkToRoof';
+    const walking = this.state === 'walk' || this.state === 'walkToRoof' || this.state === 'trafficClear';
     const walkBob = walking ? Math.sin(this.t * 13) * 5 : 0;
     const hop = this.bounce * 16 + (dance ? Math.max(0, Math.sin(this.t * 9)) * 18 : 0);
     const stretch = this.state === 'stretch' ? 1 + Math.sin(Math.min(1, 2.2 - this.stateTime) * Math.PI) * 0.32 : 1;

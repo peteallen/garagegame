@@ -453,9 +453,11 @@ export class Garage {
     const sprite = this.sprite('building');
     if (sprite) {
       ctx.save();
-      ctx.shadowColor = 'rgba(17,32,39,.25)';
-      ctx.shadowBlur = 24;
-      ctx.shadowOffsetY = 14;
+      if (!this.game.reducedCanvasEffects) {
+        ctx.shadowColor = 'rgba(17,32,39,.25)';
+        ctx.shadowBlur = 24;
+        ctx.shadowOffsetY = 14;
+      }
       ctx.drawImage(sprite, 198, 41, 1070, 561);
       ctx.restore();
       if (this.signFlicker > 0.02 || night) {
@@ -471,9 +473,11 @@ export class Garage {
       return;
     }
     ctx.save();
-    ctx.shadowColor = 'rgba(17,32,39,.28)';
-    ctx.shadowBlur = 26;
-    ctx.shadowOffsetY = 16;
+    if (!this.game.reducedCanvasEffects) {
+      ctx.shadowColor = 'rgba(17,32,39,.28)';
+      ctx.shadowBlur = 26;
+      ctx.shadowOffsetY = 16;
+    }
     ctx.fillStyle = night ? '#b98c59' : '#f0bf76';
     roundRect(ctx, 218, 180, 1030, 420, 28);
     ctx.fill();
@@ -722,9 +726,11 @@ export class Garage {
       ctx.restore();
 
       ctx.save();
-      ctx.globalCompositeOperation = 'lighter';
-      ctx.shadowColor = 'rgba(255,211,112,.8)';
-      ctx.shadowBlur = 18;
+      if (!this.game.reducedCanvasEffects) {
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.shadowColor = 'rgba(255,211,112,.8)';
+        ctx.shadowBlur = 18;
+      }
       ctx.fillStyle = 'rgba(255,239,177,.72)';
       roundRect(ctx, bay.x - Math.min(34, width * 0.22), bayTop + 11, Math.min(68, width * 0.44), 8, 4);
       ctx.fill();
@@ -737,13 +743,15 @@ export class Garage {
       ? { x: 240, y: 66, w: 986, h: 78, first: 276, last: 1200, step: 43, cy: 105 }
       : { x: 198, y: 158, w: 1070, h: 74, first: 254, last: 1230, step: 64, cy: 188 };
     ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    ctx.shadowColor = 'rgba(255,190,72,.75)';
-    ctx.shadowBlur = 28;
+    if (!this.game.reducedCanvasEffects) {
+      ctx.globalCompositeOperation = 'lighter';
+      ctx.shadowColor = 'rgba(255,190,72,.75)';
+      ctx.shadowBlur = 28;
+    }
     ctx.fillStyle = 'rgba(255,202,82,.12)';
     roundRect(ctx, sign.x, sign.y, sign.w, sign.h, 30);
     ctx.fill();
-    ctx.shadowBlur = 10;
+    if (!this.game.reducedCanvasEffects) ctx.shadowBlur = 10;
     ctx.fillStyle = 'rgba(255,239,158,.76)';
     for (let x = sign.first; x < sign.last; x += sign.step) {
       ctx.beginPath();

@@ -100,7 +100,7 @@ export class Vehicle {
     if (this.game) this.moveSeq = ++this.game.moveCounter;
     const started = this.motion.follow(segments, {
       onSegment: (segment) => {
-        this.reverseBeepTime = segment.direction === -1 ? 0.01 : 0;
+        this.reverseBeepTime = segment.direction === -1 && this.config.backupBeep ? 0.01 : 0;
         if (segment.cue) this.game?.onMotionCue?.(this, segment.cue);
       },
       onComplete: () => {
@@ -183,11 +183,15 @@ export class Vehicle {
     this.glow = damp(this.glow, this.selected ? 1 : 0, 7, dt);
     this.flash = this.problem ? 0.45 + Math.sin(this.t * 5.2) * 0.45 : damp(this.flash, 0, 8, dt);
 
-    if (this.reversing) {
+    if (this.reversing && this.config.backupBeep) {
       this.reverseBeepTime -= dt;
       if (this.reverseBeepTime <= 0) {
-        this.reverseBeepTime = 0.62;
-        this.game?.playSfx?.('backup_beeper', () => this.game.sound.backupBeep());
+        this.reverseBeepTime = 1.08;
+        this.game?.playSfx?.(
+          'backup_beeper',
+          () => this.game.sound.backupBeep(),
+          { vol: 0.22, rate: 0.8, jitter: 0.015 },
+        );
       }
     }
 
@@ -297,11 +301,13 @@ export class Vehicle {
     glow.addColorStop(1, 'rgba(255,232,132,0)');
 
     ctx.save();
-    ctx.globalCompositeOperation = 'screen';
+    if (!this.game?.reducedCanvasEffects) ctx.globalCompositeOperation = 'screen';
     ctx.globalAlpha = alpha;
     ctx.fillStyle = glow;
-    ctx.shadowColor = 'rgba(255,239,153,.32)';
-    ctx.shadowBlur = 16;
+    if (!this.game?.reducedCanvasEffects) {
+      ctx.shadowColor = 'rgba(255,239,153,.32)';
+      ctx.shadowBlur = 16;
+    }
     for (const side of [-1, 1]) {
       const center = side * width * 0.27;
       ctx.beginPath();
@@ -361,11 +367,20 @@ export class Vehicle {
 
   drawSelection(ctx) {
     ctx.save();
-    ctx.globalAlpha = 0.35 + this.glow * 0.35;
-    ctx.strokeStyle = '#ffe56e';
-    ctx.lineWidth = 8;
-    ctx.setLineDash([18, 12]);
-    ctx.lineDashOffset = -this.t * 30;
+    const pulse = 0.5 + Math.sin(this.t * 4) * 0.5;
+    ctx.globalAlpha = 0.14 + this.glow * 0.12 + pulse * 0.05;
+    ctx.fillStyle = '#ffe56e';
+    if (!this.game?.reducedCanvasEffects) {
+      ctx.shadowColor = 'rgba(255,226,92,.8)';
+      ctx.shadowBlur = 20;
+    }
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.config.length * 0.62, this.config.width * 0.73, 0, 0, TAU);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.42 + this.glow * 0.28;
+    ctx.strokeStyle = '#ffdd58';
+    ctx.lineWidth = 4;
     ctx.beginPath();
     ctx.ellipse(0, 0, this.config.length * 0.62, this.config.width * 0.73, 0, 0, TAU);
     ctx.stroke();

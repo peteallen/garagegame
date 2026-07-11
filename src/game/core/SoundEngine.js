@@ -126,7 +126,7 @@ export class SoundEngine {
   }
 
   backupBeep() {
-    this.tone({ freq: 980, dur: 0.11, type: 'square', vol: 0.05 });
+    this.tone({ freq: 640, end: 600, dur: 0.09, type: 'triangle', vol: 0.025 });
   }
 
   squeak() {

@@ -18,6 +18,7 @@ export class TowTruck extends Vehicle {
     this.beacon = 0;
     this.hook = 0;
     this.hookTarget = 0;
+    this.tapTime = 0;
     this.towing = null;
     this.problemTarget = null;
   }
@@ -26,8 +27,20 @@ export class TowTruck extends Vehicle {
     return !this.moving && !this.towing && this.status === 'home';
   }
 
-  contains(x, y, padding = 48) {
+  contains(x, y, padding = 26) {
     return super.contains(x, y, padding);
+  }
+
+  onTap() {
+    this.tapTime = 2.6;
+    this.beacon = 1;
+    this.hookTarget = 1;
+    this.expression = 'excited';
+    this.expressionTime = 2.6;
+    this.beginSurprise('hop');
+    this.game?.playVehicleHorn?.(this);
+    this.game?.particles?.hearts?.(this.x, this.y - 48, 4);
+    this.game?.particles?.sparkle?.(this.x - 90, this.y - 10, 7);
   }
 
   summon(target) {
@@ -57,7 +70,10 @@ export class TowTruck extends Vehicle {
 
   update(dt) {
     super.update(dt);
-    this.beacon = damp(this.beacon, this.status === 'home' ? 0 : 1, 4, dt);
+    this.tapTime = Math.max(0, this.tapTime - dt);
+    const showingOff = this.tapTime > 0;
+    this.beacon = damp(this.beacon, this.status === 'home' && !showingOff ? 0 : 1, 4, dt);
+    if (!this.towing && !this.problemTarget) this.hookTarget = showingOff ? 1 : 0;
     this.hook = damp(this.hook, this.hookTarget, 7, dt);
     if (this.towing) {
       const gap = (this.config.length + this.towing.config.length) * 0.49 + 26;
