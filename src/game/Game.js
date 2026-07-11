@@ -162,6 +162,13 @@ export class Game {
     }
 
     if (this.towTruck.contains(x, y)) {
+      // The tow truck is a decorative prop until rescue is ready. It must not
+      // swallow the core "selected car + road tap = drive out" command where
+      // its generous touch target overlaps the road.
+      if (this.selectedVehicle?.status === 'parked' && this.garage.containsRoad(x, y)) {
+        this.sendVehicleOut(this.selectedVehicle);
+        return;
+      }
       this.towTruck.bounce = 1;
       this.towTruck.beacon = 1;
       this.sound.horn(105);
