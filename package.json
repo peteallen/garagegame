@@ -1,0 +1,15 @@
+{
+  "name": "beep-beep-garage",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "check:assets": "node scripts/check_assets.mjs",
+    "build": "npm run check:assets && vite build",
+    "preview": "vite preview --host 0.0.0.0"
+  },
+  "devDependencies": {
+    "vite": "^7.0.4"
+  }
+}

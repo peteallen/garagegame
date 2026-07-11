@@ -1,0 +1,52 @@
+name: Publish garage game
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: garage-pages
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Build versioned site
+        env:
+          GITHUB_PAGES: "true"
+          VITE_ASSET_VERSION: ${{ github.sha }}
+        run: |
+          npm run build
+          printf '{"version":"%s"}\n' "$GITHUB_SHA" > dist/version.json
+          touch dist/.nojekyll
+
+      - name: Publish gh-pages branch
+        working-directory: dist
+        run: |
+          git init
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "Deploy ${GITHUB_SHA}"
+          git push --force "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:gh-pages
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Request Pages build
+        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/pages/builds" || echo "Pages will be enabled after the first branch publish."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
