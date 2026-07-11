@@ -73,9 +73,12 @@ export class Garage {
   }
 
   occupiedBayIds(excludeVehicle = null) {
+    // targetBayId reserves a bay while a car is still driving toward it, so
+    // two movers can never be sent to the same stall.
     return new Set(this.game.vehicles
-      .filter((vehicle) => vehicle !== excludeVehicle && vehicle.bayId && vehicle.status !== 'exiting')
-      .map((vehicle) => vehicle.bayId));
+      .filter((vehicle) => vehicle !== excludeVehicle && vehicle.status !== 'exiting')
+      .flatMap((vehicle) => [vehicle.bayId, vehicle.targetBayId])
+      .filter(Boolean));
   }
 
   nearestOpenBay(vehicle, excluded = this.occupiedBayIds(vehicle)) {
@@ -106,6 +109,12 @@ export class Garage {
 
   containsBooth(x, y) {
     return pointInRect(x, y, this.pickupBooth.hit, 16);
+  }
+
+  // The full road strip — dropping or aiming a parked car here means
+  // "drive out please".
+  containsRoad(x, y) {
+    return y >= 688 && y <= 838;
   }
 
   arrivalPath(vehicle) {
@@ -278,6 +287,22 @@ export class Garage {
         speed: vehicle.config.speed * 0.78,
       },
     ];
+  }
+
+  // Bay-to-bay move: pull out onto the lane, then either continue right into
+  // the reverse-in maneuver, or — when the target is behind the pull-out
+  // point — drive around the block (offscreen loop) and come back in from
+  // the left. Real driving the whole way; the validator checks every join.
+  reparkPath(vehicle, fromBay, bay) {
+    const lane = this.pathOutOfBay(vehicle, fromBay);
+    const start = lane.at(-1).p3;
+    const offset = vehicle.large ? 112 : 88;
+    const radius = vehicle.config.minTurnRadius + 22;
+    const approachX = bay.park.x + offset - radius;
+    if (approachX > start.x + 40) {
+      return [...lane, ...this.parkingPath(vehicle, bay, start)];
+    }
+    return [...lane, ...this.offscreenLoopToBay(vehicle, start, bay)];
   }
 
   offscreenLoopToBay(vehicle, start, bay, { towing = false } = {}) {

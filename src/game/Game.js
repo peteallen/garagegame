@@ -6,7 +6,7 @@ import { VEHICLE_TYPES } from './entities/vehicleCatalog.js';
 import { Particles } from './fx/Particles.js';
 import { Hud } from './ui/Hud.js';
 import { loadGarageState, saveGarageState } from './core/GarageState.js';
-import { cubicPoint } from './core/VehicleMotion.js';
+import { cubicPoint, polygonsOverlap } from './core/VehicleMotion.js';
 import { clamp, dist, pick, roundRect, TAU } from './core/math.js';
 import { triggerVehicleSurprise } from './actions/vehicleSurprises.js';
 
@@ -19,6 +19,7 @@ export class Game {
     this.assets = assets;
     this.time = 0;
     this.splashTime = SPLASH_DURATION;
+    this.moveCounter = 0;
     this.isNight = false;
     this.selectedVehicle = null;
     this.pickupRequest = null;
@@ -93,7 +94,7 @@ export class Game {
     if (!this.pointer) return;
     const point = this.toWorld(clientX, clientY);
     this.pointer.point = point;
-    if (this.pointer.vehicle?.status === 'waiting' && dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y) > 24) {
+    if (['waiting', 'parked'].includes(this.pointer.vehicle?.status) && dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y) > 24) {
       this.dragVehicle = this.pointer.vehicle;
       this.dragBay = this.garage.hitBay(point.x, point.y);
     }
@@ -109,8 +110,11 @@ export class Game {
       this.dragVehicle = null;
       this.dragBay = null;
       this.pointer = null;
-      if (bay) this.parkVehicle(vehicle, bay);
-      else {
+      if (bay && vehicle.status === 'waiting') this.parkVehicle(vehicle, bay);
+      else if (bay && vehicle.status === 'parked' && vehicle.bayId !== bay.id) this.reparkVehicle(vehicle, bay);
+      else if (!bay && vehicle.status === 'parked' && this.garage.containsRoad(point.x, point.y)) {
+        this.sendVehicleOut(vehicle);
+      } else {
         vehicle.select();
         this.selectedVehicle = vehicle;
         this.particles.sparkle(vehicle.x, vehicle.y - 20, 5);
@@ -162,10 +166,19 @@ export class Game {
         ? this.selectedVehicle
         : this.vehicles.find((item) => item.status === 'waiting');
       if (waiting) this.parkVehicle(waiting, bay);
-      else {
+      else if (this.selectedVehicle?.status === 'parked' && this.selectedVehicle.bayId !== bay.id) {
+        this.reparkVehicle(this.selectedVehicle, bay);
+      } else {
         this.sound.pop();
         this.particles.sparkle(bay.park.x, bay.park.y, 5);
       }
+      return;
+    }
+
+    // A selected parked car + a tap on the road = "you can go now!" This is
+    // the direct way out; the booth pickup game stays as a bonus flow.
+    if (this.selectedVehicle?.status === 'parked' && this.garage.containsRoad(x, y)) {
+      this.sendVehicleOut(this.selectedVehicle);
       return;
     }
 
@@ -273,6 +286,7 @@ export class Game {
     }
     vehicle.deselect();
     if (this.selectedVehicle === vehicle) this.selectedVehicle = null;
+    vehicle.targetBayId = bay.id;
     const started = vehicle.drive(this.garage.parkingPath(vehicle, bay), {
       status: 'parking',
       onComplete: () => {
@@ -282,6 +296,7 @@ export class Game {
         this.save();
       },
     });
+    if (!started) vehicle.targetBayId = null;
     return started;
   }
 
@@ -292,6 +307,7 @@ export class Game {
     vehicle.heading = bay.park.heading;
     vehicle.status = 'parked';
     vehicle.bayId = bay.id;
+    vehicle.targetBayId = null;
     vehicle.deselect();
   }
 
@@ -327,6 +343,35 @@ export class Game {
         this.save();
       },
     });
+  }
+
+  sendVehicleOut(vehicle) {
+    if (!vehicle || vehicle.status !== 'parked') return false;
+    const bay = this.garage.bayById(vehicle.bayId);
+    if (!bay) return false;
+    if (this.pickupRequest === vehicle) this.pickupRequest = null;
+    vehicle.deselect();
+    if (this.selectedVehicle === vehicle) this.selectedVehicle = null;
+    vehicle.bayId = null;
+    vehicle.expression = 'excited';
+    vehicle.expressionTime = 2;
+    const started = vehicle.drive(this.garage.exitPath(vehicle, bay), {
+      status: 'exiting',
+      onComplete: () => {
+        this.removeVehicle(vehicle);
+        this.save();
+      },
+    });
+    if (!started) {
+      vehicle.status = 'parked';
+      vehicle.bayId = bay.id;
+      return false;
+    }
+    this.playVehicleHorn(vehicle);
+    this.playVehicleEngine(vehicle);
+    this.particles.sparkle(vehicle.x, vehicle.y - 30, 10);
+    this.save();
+    return true;
   }
 
   tapStation(station) {
@@ -375,6 +420,65 @@ export class Game {
 
   playVehicleEngine(vehicle) {
     this.sound.rev(vehicle.config.electric ? 560 : vehicle.large ? 75 : 120);
+  }
+
+  // Solid-vehicle yielding: a mover holds when its ahead-probe touches anyone.
+  // Between two movers the earlier mover has right of way, so exactly one
+  // yields and jams can't be mutual. Stationary blockers always win — the
+  // held car beeps until the player (or a pickup) clears the way.
+  motionBlocked(vehicle) {
+    const probe = vehicle.aheadFootprint();
+    // The tow truck stays a friendly prop (not solid) until the rescue arc
+    // lands — its home pad sits inside the bay backing sweep, so treating it
+    // as an obstacle would deadlock parking maneuvers.
+    for (const other of this.vehicles) {
+      if (other === vehicle) continue;
+      if (!polygonsOverlap(probe, other.footprint(4))) continue;
+      if (other.moving) {
+        if (other.moveSeq < vehicle.moveSeq) return true;
+        continue;
+      }
+      return true;
+    }
+    return false;
+  }
+
+  reparkVehicle(vehicle, requestedBay) {
+    if (!vehicle || vehicle.status !== 'parked') return false;
+    const fromBay = this.garage.bayById(vehicle.bayId);
+    if (!fromBay) return false;
+    const occupied = this.garage.occupiedBayIds(vehicle);
+    let bay = requestedBay;
+    if (!bay || occupied.has(bay.id) || (vehicle.large && !bay.large)) {
+      bay = this.garage.nearestOpenBay(vehicle, occupied);
+    }
+    if (!bay || bay.id === fromBay.id) {
+      vehicle.bounce = 1;
+      this.sound.squeak();
+      return false;
+    }
+    vehicle.deselect();
+    if (this.selectedVehicle === vehicle) this.selectedVehicle = null;
+    vehicle.bayId = null;
+    vehicle.targetBayId = bay.id;
+    const started = vehicle.drive(this.garage.reparkPath(vehicle, fromBay, bay), {
+      status: 'parking',
+      onComplete: () => {
+        this.parkVehicleInstant(vehicle, bay);
+        this.sound.happy();
+        this.particles.sparkle(vehicle.x, vehicle.y - 30, 12);
+        this.save();
+      },
+    });
+    if (!started) {
+      vehicle.status = 'parked';
+      vehicle.bayId = fromBay.id;
+      vehicle.targetBayId = null;
+      return false;
+    }
+    this.playVehicleEngine(vehicle);
+    this.save();
+    return true;
   }
 
   onMotionCue(vehicle, cue) {

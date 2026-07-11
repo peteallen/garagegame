@@ -23,6 +23,7 @@ export class Vehicle {
     this.config = data.config || vehicleConfig(data.type);
     this.status = data.status || 'waiting';
     this.bayId = data.bayId ?? null;
+    this.targetBayId = null;
     this.stationId = null;
     this.care = {
       washed: Boolean(data.care?.washed),
@@ -42,6 +43,9 @@ export class Vehicle {
     this.recentSurprises = [];
     this.reverseBeepTime = 0;
     this.exhaustTime = 0;
+    this.moveSeq = 0;
+    this.blockedTime = 0;
+    this.blockedHorn = 1.6;
     this.t = rand(0, 50);
     this.motion = new VehicleMotion({
       x: data.x,
@@ -70,6 +74,16 @@ export class Vehicle {
     return orientedFootprint(this.x, this.y, this.heading, this.config.length, this.config.width, padding);
   }
 
+  // Box just ahead of the bumper in the direction of travel — the "would I
+  // hit someone" probe used for polite yielding, reverse-aware.
+  aheadFootprint() {
+    const direction = this.reversing ? -1 : 1;
+    const reach = this.config.length * 0.5 + 34;
+    const cx = this.x + Math.cos(this.heading) * reach * direction;
+    const cy = this.y + Math.sin(this.heading) * reach * direction;
+    return orientedFootprint(cx, cy, this.heading, this.config.length * 0.82, this.config.width + 10, 0);
+  }
+
   contains(x, y, padding = 38) {
     const dx = x - this.x;
     const dy = y - this.y;
@@ -83,6 +97,7 @@ export class Vehicle {
 
   drive(segments, { status = 'driving', onComplete } = {}) {
     this.status = status;
+    if (this.game) this.moveSeq = ++this.game.moveCounter;
     const started = this.motion.follow(segments, {
       onSegment: (segment) => {
         this.reverseBeepTime = segment.direction === -1 ? 0.01 : 0;
@@ -141,7 +156,26 @@ export class Vehicle {
 
   update(dt) {
     this.t += dt;
-    this.motion.update(dt);
+    const blocked = this.moving && Boolean(this.game?.motionBlocked?.(this));
+    if (blocked) {
+      // Hold in place (path time frozen) and ask politely — the jam resolves
+      // when the other car moves on or the player moves the blocker.
+      this.blockedTime += dt;
+      this.blockedHorn -= dt;
+      if (this.blockedHorn <= 0) {
+        this.blockedHorn = 3.8;
+        this.game?.playVehicleHorn?.(this);
+        this.bounce = Math.max(this.bounce, 0.45);
+      }
+      if (this.blockedTime > 1.4 && this.expressionTime <= 0) {
+        this.expression = 'worried';
+        this.expressionTime = 0.6;
+      }
+    } else {
+      this.blockedTime = 0;
+      this.blockedHorn = 1.6;
+      this.motion.update(dt);
+    }
     this.expressionTime = Math.max(0, this.expressionTime - dt);
     if (this.expressionTime <= 0) this.expression = this.problem ? 'worried' : 'happy';
     this.bounce = damp(this.bounce, 0, 6.5, dt);
