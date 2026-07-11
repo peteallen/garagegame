@@ -6,6 +6,9 @@ import { VEHICLE_TYPES } from './entities/vehicleCatalog.js';
 import { Particles } from './fx/Particles.js';
 import { Hud } from './ui/Hud.js';
 import { loadGarageState, saveGarageState } from './core/GarageState.js';
+import { SoundEngine } from './core/SoundEngine.js';
+import { Sfx } from './core/Sfx.js';
+import { Voice } from './core/Voice.js';
 import { cubicPoint, polygonsOverlap } from './core/VehicleMotion.js';
 import { clamp, dist, pick, roundRect, TAU } from './core/math.js';
 import { triggerVehicleSurprise } from './actions/vehicleSurprises.js';
@@ -28,7 +31,10 @@ export class Game {
     this.pointer = null;
     this.lastArrivalTypes = [];
     this.nextVehicleId = 1;
-    this.sound = createWorkbenchSound();
+    this.sound = new SoundEngine();
+    this.sfx = new Sfx(this.sound);
+    this.voice = new Voice(this.sound);
+    this.welcomed = false;
     this.particles = new Particles();
     this.garage = new Garage(this);
     const saved = loadGarageState(this.garage);
@@ -56,8 +62,14 @@ export class Game {
 
   adoptRuntime(previous) {
     if (!previous) return;
-    if (previous.sound?.ctx) this.sound.ctx = previous.sound.ctx;
-    if (previous.sound) this.sound.muted = previous.sound.muted;
+    // Adopt the whole audio stack — copying just the AudioContext onto a
+    // fresh SoundEngine would leave it without its master/compressor graph.
+    if (previous.sound?.master !== undefined) {
+      this.sound = previous.sound;
+      if (previous.sfx) this.sfx = previous.sfx;
+      if (previous.voice) this.voice = previous.voice;
+    }
+    this.welcomed = Boolean(previous.welcomed);
     this.splashTime = 0; // no splash replay on hot swaps mid-session
   }
 
@@ -255,7 +267,12 @@ export class Game {
     });
     this.vehicles.push(vehicle);
     this.garage.openDoor();
-    this.sound.door();
+    this.playSfx('doorbell', () => this.sound.pickupBell());
+    this.playSfx('garage_door_open', () => this.sound.door());
+    if (!this.welcomed) {
+      this.welcomed = true;
+      this.say('garage_welcome');
+    }
     vehicle.drive(this.garage.arrivalPath(vehicle), {
       status: 'arriving',
       onComplete: () => {
@@ -264,7 +281,9 @@ export class Game {
         vehicle.expressionTime = 2;
         vehicle.bounce = 1;
         this.garage.closeDoor();
+        this.playSfx('garage_door_close', () => this.sound.door());
         this.playVehicleHorn(vehicle);
+        this.say('hello_park', vehicle);
         this.selectVehicle(vehicle);
         this.save();
       },
@@ -320,7 +339,7 @@ export class Game {
     }
     this.pickupRequest = pick(parked);
     this.pickupRequest.bounce = 0.5;
-    this.sound.pickupBell();
+    this.playSfx('pickup_bell', () => this.sound.pickupBell());
   }
 
   pickupVehicle(vehicle) {
@@ -329,11 +348,13 @@ export class Game {
     this.pickupRequest = null;
     vehicle.bayId = null;
     vehicle.deselect();
+    this.say('thats_me', vehicle);
     vehicle.drive(this.garage.exitPath(vehicle, bay), {
       status: 'exiting',
       onComplete: () => {
         this.removeVehicle(vehicle);
-        this.sound.fanfare();
+        this.playSfx('party_horns', () => this.sound.fanfare());
+        this.playSfx('confetti_pop', null);
         this.particles.confetti(800, 310, 55);
         this.pet.dance(4);
         for (const parked of this.vehicles.filter((item) => item.status === 'parked')) {
@@ -367,6 +388,7 @@ export class Game {
       vehicle.bayId = bay.id;
       return false;
     }
+    this.say('thats_me', vehicle);
     this.playVehicleHorn(vehicle);
     this.playVehicleEngine(vehicle);
     this.particles.sparkle(vehicle.x, vehicle.y - 30, 10);
@@ -389,6 +411,12 @@ export class Game {
     window.setTimeout(() => { if (station.active === vehicle.id) station.active = null; }, 1800);
     if (station.id === 'wash') this.particles.foam(vehicle.x, vehicle.y, 18);
     else this.particles.sparkle(vehicle.x, vehicle.y - 25, 12);
+    const completionLine = {
+      wash: 'wash_done',
+      charge: 'charge_done',
+      air: 'air_done',
+    }[station.id];
+    if (completionLine) this.say(completionLine, vehicle);
     this.sound.happy();
     this.save();
   }
@@ -409,17 +437,23 @@ export class Game {
   toggleNight() {
     this.isNight = !this.isNight;
     this.sound.magic();
+    if (this.isNight) this.say('good_night');
     this.particles.sparkle(1498, 100, 14);
     this.save();
   }
 
+  // Recorded clip first, synth recipe as the always-there fallback.
+  playSfx(name, fallback, opts) {
+    if (!this.sfx?.play?.(name, opts)) fallback?.();
+  }
+
   playVehicleHorn(vehicle) {
     const pitches = { sports: 480, pickup: 315, taxi: 410, police: 540, fire: 185, icecream: 620, ev: 570, bus: 155 };
-    this.sound.horn(pitches[vehicle.type] || 350);
+    this.playSfx(vehicle.config.horn, () => this.sound.horn(pitches[vehicle.type] || 350));
   }
 
   playVehicleEngine(vehicle) {
-    this.sound.rev(vehicle.config.electric ? 560 : vehicle.large ? 75 : 120);
+    this.playSfx(vehicle.config.engine, () => this.sound.rev(vehicle.config.electric ? 560 : vehicle.large ? 75 : 120), { vol: 0.55 });
   }
 
   // Solid-vehicle yielding: a mover holds when its ahead-probe touches anyone.
@@ -482,13 +516,14 @@ export class Game {
   }
 
   onMotionCue(vehicle, cue) {
-    if (cue === 'reverse' || cue === 'tow-reverse') this.sound.backupBeep();
+    if (cue === 'reverse' || cue === 'tow-reverse') this.playSfx('backup_beeper', () => this.sound.backupBeep());
     if (cue === 'hello') this.playVehicleHorn(vehicle);
   }
 
-  say() {
-    // The generated voice pack is wired in by the media pipeline; synth feedback
-    // keeps this live workbench playful before those clips land.
+  say(key, vehicle = null, options = {}) {
+    const spoken = this.voice?.say?.(key, { vehicleType: vehicle?.type, ...options });
+    if (!spoken) this.sound.chime?.();
+    return spoken;
   }
 
   save() {
@@ -691,46 +726,4 @@ export class Game {
     cancelAnimationFrame(this._raf);
     if (window.__garageGame === this) delete window.__garageGame;
   }
-}
-
-function createWorkbenchSound() {
-  const sound = {
-    ctx: null,
-    muted: false,
-    unlock() {
-      if (!this.ctx) this.ctx = new (window.AudioContext || window.webkitAudioContext)();
-      this.ctx.resume?.();
-    },
-    toggleMute() { this.muted = !this.muted; if (!this.muted) this.ack(); },
-    tone(frequency, duration = 0.12, type = 'sine', volume = 0.09, delay = 0) {
-      if (!this.ctx || this.muted) return;
-      const start = this.ctx.currentTime + delay;
-      const oscillator = this.ctx.createOscillator();
-      const gain = this.ctx.createGain();
-      oscillator.type = type;
-      oscillator.frequency.setValueAtTime(frequency, start);
-      gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(volume, start + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, start + duration);
-      oscillator.connect(gain).connect(this.ctx.destination);
-      oscillator.start(start);
-      oscillator.stop(start + duration + 0.03);
-    },
-    pop() { this.tone(520, 0.08, 'sine', 0.07); },
-    ack() { this.tone(620, 0.08, 'sine', 0.06); this.tone(850, 0.1, 'sine', 0.06, 0.08); },
-    happy() { [540, 680, 850].forEach((frequency, index) => this.tone(frequency, 0.13, 'triangle', 0.065, index * 0.09)); },
-    horn(frequency = 320) { this.tone(frequency, 0.24, 'square', 0.075); this.tone(frequency * 1.02, 0.19, 'sawtooth', 0.035, 0.05); },
-    backupBeep() { this.tone(980, 0.11, 'square', 0.05); },
-    squeak() { this.tone(760, 0.08, 'triangle', 0.05); this.tone(510, 0.1, 'triangle', 0.04, 0.07); },
-    door() { [115, 105, 92].forEach((frequency, index) => this.tone(frequency, 0.3, 'sawtooth', 0.025, index * 0.13)); },
-    pickupBell() { this.tone(920, 0.32, 'sine', 0.08); this.tone(1380, 0.38, 'sine', 0.045, 0.04); },
-    rev(frequency = 110) { this.tone(frequency, 0.7, 'sawtooth', 0.04); this.tone(frequency * 2, 0.55, 'square', 0.018); },
-    magic() { [420, 620, 840, 1120].forEach((frequency, index) => this.tone(frequency, 0.25, 'sine', 0.045, index * 0.08)); },
-    fanfare() { [392, 523, 659, 784].forEach((frequency, index) => this.tone(frequency, 0.28, 'triangle', 0.055, index * 0.12)); },
-    boing() { this.tone(240, 0.24, 'sine', 0.07); },
-    alarmChirp() { this.tone(760, 0.08, 'square', 0.04); this.tone(620, 0.08, 'square', 0.04, 0.09); },
-    tinyHorn() { this.horn(460); },
-    catChirp() { this.tone(680, 0.15, 'triangle', 0.045); this.tone(880, 0.12, 'triangle', 0.035, 0.12); },
-  };
-  return sound;
 }

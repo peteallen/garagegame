@@ -187,7 +187,7 @@ export class Vehicle {
       this.reverseBeepTime -= dt;
       if (this.reverseBeepTime <= 0) {
         this.reverseBeepTime = 0.62;
-        this.game?.sound?.backupBeep?.();
+        this.game?.playSfx?.('backup_beeper', () => this.game.sound.backupBeep());
       }
     }
 
@@ -210,14 +210,14 @@ export class Vehicle {
       action.fired = true;
       if (action.name === 'horn') this.game?.playVehicleHorn?.(this);
       if (action.name === 'rev') this.game?.playVehicleEngine?.(this, { rev: true });
-      if (action.name === 'alarm') this.game?.sound?.alarmChirp?.();
+      if (action.name === 'alarm') this.game?.playSfx?.('alarm_chirp', () => this.game.sound.alarmChirp());
       if (action.name === 'trunk') this.game?.sound?.pop?.();
       if (action.name === 'hop') this.game?.sound?.boing?.();
     }
     if (action.name === 'boogie') this.bounce = Math.max(this.bounce, 0.5 + Math.sin(action.elapsed * 10) * 0.4);
     if (action.name === 'hop') this.bounce = Math.max(this.bounce, Math.sin(clamp(progress, 0, 1) * Math.PI));
     if (action.name === 'alarm' && Math.floor(action.elapsed * 5) !== Math.floor((action.elapsed - dt) * 5)) {
-      this.game?.sound?.alarmChirp?.();
+      this.game?.playSfx?.('alarm_chirp', () => this.game.sound.alarmChirp());
     }
     if (action.name === 'exhaust' && Math.floor(action.elapsed * 7) !== Math.floor((action.elapsed - dt) * 7)) {
       this.game?.particles?.exhaust?.(this.rearPoint(), this.heading, 2);

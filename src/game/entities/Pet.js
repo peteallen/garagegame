@@ -26,7 +26,7 @@ export class Pet {
 
   onTap() {
     if (this.roofCar) {
-      this.game?.sound?.catChirp?.();
+      this.game?.playSfx?.('cat_chirp', () => this.game.sound.catChirp());
       this.game?.particles?.hearts?.(this.roofCar.x, this.roofCar.y - 80, 4);
       this.bounce = 1;
       return;
@@ -34,7 +34,7 @@ export class Pet {
     this.state = 'stretch';
     this.stateTime = 2.2;
     this.bounce = 1;
-    this.game?.sound?.catChirp?.();
+    this.game?.playSfx?.('cat_chirp', () => this.game.sound.catChirp());
     this.game?.particles?.hearts?.(this.x, this.y - 55, 3);
   }
 
