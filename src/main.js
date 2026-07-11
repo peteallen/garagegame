@@ -3,7 +3,7 @@ import { Game } from './game/Game.js';
 import { startVersionWatcher } from './game/core/VersionWatcher.js';
 
 const canvas = document.querySelector('#game');
-const game = new Game(canvas);
+let game = new Game(canvas);
 startVersionWatcher();
 
 const resize = () => game.resize();
@@ -20,5 +20,15 @@ canvas.addEventListener('pointercancel', (event) => game.onPointerUp(event.clien
 canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
 if (import.meta.hot) {
+  // Hot-swap the whole game in place: any edit under game/ bubbles up to
+  // Game.js, we rebuild from persisted state, and adoptRuntime carries the
+  // unlocked audio context across so sound keeps working without a re-tap.
+  import.meta.hot.accept('./game/Game.js', (mod) => {
+    if (!mod?.Game) return;
+    const previous = game;
+    previous.destroy();
+    game = new mod.Game(canvas);
+    game.adoptRuntime?.(previous);
+  });
   import.meta.hot.dispose(() => game.destroy());
 }

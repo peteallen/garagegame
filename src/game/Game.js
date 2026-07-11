@@ -49,6 +49,12 @@ export class Game {
     window.__garageGame = this;
   }
 
+  adoptRuntime(previous) {
+    if (!previous) return;
+    if (previous.sound?.ctx) this.sound.ctx = previous.sound.ctx;
+    if (previous.sound) this.sound.muted = previous.sound.muted;
+  }
+
   resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const width = window.innerWidth;
