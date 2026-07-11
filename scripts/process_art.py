@@ -45,15 +45,15 @@ OVERHANG = 6
 # length/width mirror vehicleCatalog.js. All vehicles are generated nose-right;
 # rotate fixes strays without touching game code.
 VEHICLES = {
-    "vehicle_sports": (156, 78, "green", 0),
-    "vehicle_pickup": (174, 84, "magenta", 0),
-    "vehicle_taxi": (164, 80, "green", 0),
-    "vehicle_police": (166, 82, "green", 0),
-    "vehicle_fire": (196, 91, "green", 0),
-    "vehicle_icecream": (184, 88, "magenta", 0),
-    "vehicle_ev": (146, 76, "green", 0),
-    "vehicle_bus": (226, 96, "green", 0),
-    "vehicle_tow": (190, 90, "green", 0),
+    "vehicle_sports": (156, 80, "green", 0),
+    "vehicle_pickup": (174, 90, "magenta", 0),
+    "vehicle_taxi": (164, 85, "green", 0),
+    "vehicle_police": (166, 100, "green", 0),
+    "vehicle_fire": (196, 95, "green", 0),
+    "vehicle_icecream": (184, 102, "magenta", 0),
+    "vehicle_ev": (146, 81, "magenta", 0),
+    "vehicle_bus": (226, 114, "green", 0),
+    "vehicle_tow": (190, 89, "green", 0),
 }
 
 # name -> (aspect w/h or None to keep trim aspect, max long side, key color)

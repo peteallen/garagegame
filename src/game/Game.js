@@ -6,6 +6,7 @@ import { VEHICLE_TYPES } from './entities/vehicleCatalog.js';
 import { Particles } from './fx/Particles.js';
 import { Hud } from './ui/Hud.js';
 import { loadGarageState, saveGarageState } from './core/GarageState.js';
+import { cubicPoint } from './core/VehicleMotion.js';
 import { clamp, dist, pick, roundRect, TAU } from './core/math.js';
 import { triggerVehicleSurprise } from './actions/vehicleSurprises.js';
 
@@ -417,7 +418,65 @@ export class Game {
     this.drawPickupBubble(ctx);
     this.drawTitle(ctx);
     this.drawVignette(ctx);
+    if (this.debug) this.drawDebug(ctx);
     this.hud.draw(ctx);
+  }
+
+  // ?debug — registration truth: collision box (lime), tap zone (yellow),
+  // wheels/heading, active motion paths, and every static hit zone.
+  drawDebug(ctx) {
+    ctx.save();
+    ctx.lineWidth = 2;
+    const poly = (points) => {
+      ctx.beginPath();
+      points.forEach((point, index) => (index ? ctx.lineTo(point.x, point.y) : ctx.moveTo(point.x, point.y)));
+      ctx.closePath();
+      ctx.stroke();
+    };
+    for (const vehicle of [...this.vehicles, this.towTruck]) {
+      ctx.strokeStyle = '#3dff6e';
+      ctx.setLineDash([]);
+      poly(vehicle.footprint());
+      ctx.strokeStyle = '#ffe14d';
+      ctx.setLineDash([6, 6]);
+      poly(vehicle.footprint(38));
+      ctx.setLineDash([]);
+      ctx.fillStyle = '#ff4dc4';
+      ctx.beginPath();
+      ctx.arc(vehicle.x, vehicle.y, 4, 0, TAU);
+      ctx.fill();
+      ctx.strokeStyle = '#ff4dc4';
+      ctx.beginPath();
+      ctx.moveTo(vehicle.x, vehicle.y);
+      ctx.lineTo(vehicle.x + Math.cos(vehicle.heading) * 46, vehicle.y + Math.sin(vehicle.heading) * 46);
+      ctx.stroke();
+      const path = vehicle.motion.path;
+      if (path) {
+        ctx.strokeStyle = '#53e0ff';
+        ctx.beginPath();
+        for (const segment of path) {
+          for (let index = 0; index <= 16; index++) {
+            const point = cubicPoint(segment, index / 16);
+            if (index === 0) ctx.moveTo(point.x, point.y);
+            else ctx.lineTo(point.x, point.y);
+          }
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.strokeStyle = '#ff4dc4';
+    ctx.setLineDash([8, 6]);
+    for (const bay of this.garage.bays) ctx.strokeRect(bay.hit.x, bay.hit.y, bay.hit.w, bay.hit.h);
+    for (const station of this.garage.stations) ctx.strokeRect(station.hit.x, station.hit.y, station.hit.w, station.hit.h);
+    const booth = this.garage.pickupBooth.hit;
+    ctx.strokeRect(booth.x, booth.y, booth.w, booth.h);
+    const road = this.garage.entrance.roadZone;
+    ctx.strokeRect(road.x, road.y, road.w, road.h);
+    const bell = this.garage.entrance.bell;
+    ctx.beginPath();
+    ctx.arc(bell.x, bell.y, bell.r + 28, 0, TAU);
+    ctx.stroke();
+    ctx.restore();
   }
 
   drawPickupBubble(ctx) {

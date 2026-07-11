@@ -10,7 +10,17 @@
 export const SPRITE_PX_PER_UNIT = 2;
 export const SPRITE_OVERHANG = 6;
 
-export const SPRITE_MANIFEST = Object.freeze({});
+export const SPRITE_MANIFEST = Object.freeze({
+  vehicle_sports: 'vehicle_sports.png',
+  vehicle_pickup: 'vehicle_pickup.png',
+  vehicle_taxi: 'vehicle_taxi.png',
+  vehicle_police: 'vehicle_police.png',
+  vehicle_fire: 'vehicle_fire.png',
+  vehicle_icecream: 'vehicle_icecream.png',
+  vehicle_ev: 'vehicle_ev.png',
+  vehicle_bus: 'vehicle_bus.png',
+  vehicle_tow: 'vehicle_tow.png',
+});
 
 export const VOICE_LINES = Object.freeze([]);
 
