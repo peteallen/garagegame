@@ -337,6 +337,10 @@ export class Game {
       return false;
     }
     if (!scheduled) {
+      const bell = this.garage.entrance.bell;
+      this.garage.flickerSign();
+      this.particles.sparkle(bell.x, bell.y, 8);
+      this.playSfx('doorbell', () => this.sound.pickupBell());
       return this.scheduleMovement('arrival', 'arrival', null, () => this.spawnArrival(forcedType, true));
     }
     const occupied = this.garage.occupiedBayIds();
@@ -364,7 +368,6 @@ export class Game {
     });
     this.vehicles.push(vehicle);
     this.garage.openDoor();
-    this.playSfx('doorbell', () => this.sound.pickupBell());
     this.playSfx('garage_door_open', () => this.sound.door());
     if (!this.welcomed) {
       this.welcomed = true;
