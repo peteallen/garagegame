@@ -56,13 +56,11 @@ SHARED_LINES = {
     "lift_done": "That tickles! All checked!",
     "flat_help": "Help! My tire is flat!",
     "battery_help": "Help! My battery is low!",
-    "fixed_thanks": "All fixed! Thank you, tow truck!",
 }
 
 # One-off lines with a fixed register.
 SOLO_LINES = {
     "garage_welcome": ("Welcome to Beep Beep Garage!", "warm"),
-    "tow_rescue": ("Tow truck to the rescue!", "deep"),
     "hooray_all_done": ("All done! Beep beep hooray!", "warm"),
     "good_night": ("Good night, little cars!", "warm"),
 }

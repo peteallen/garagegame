@@ -1,8 +1,6 @@
 import { Garage, WORLD_H, WORLD_W } from './world/Garage.js';
 import { Vehicle } from './entities/Vehicle.js';
-import { TowTruck } from './entities/TowTruck.js';
-import { Pet } from './entities/Pet.js';
-import { VEHICLE_TYPES } from './entities/vehicleCatalog.js';
+import { VEHICLE_CATALOG, VEHICLE_TYPES } from './entities/vehicleCatalog.js';
 import { Particles } from './fx/Particles.js';
 import { Hud } from './ui/Hud.js';
 import { loadGarageState, saveGarageState } from './core/GarageState.js';
@@ -49,11 +47,9 @@ export class Game {
     this.isNight = saved.isNight;
     this.nextVehicleId = saved.nextVehicleId;
     this.vehicles = saved.vehicles.map((data) => new Vehicle(this, data));
-    const towHome = this.garage.anchors.towHome;
-    this.towTruck = new TowTruck(this, towHome);
-    this.pet = new Pet(this);
     this.hud = new Hud(this);
     this.debug = new URLSearchParams(location.search).has('debug');
+    this.ensureArrival();
 
     this.resize();
     this._last = performance.now();
@@ -186,23 +182,6 @@ export class Game {
       return;
     }
 
-    if (this.towTruck.contains(x, y)) {
-      // The tow truck's touch target overlaps the edge of the road. A road
-      // tap still sends the selected parked vehicle out; otherwise the tow
-      // truck performs its own playful interaction.
-      if (this.selectedVehicle?.status === 'parked' && this.garage.containsRoad(x, y)) {
-        this.sendVehicleOut(this.selectedVehicle);
-        return;
-      }
-      this.towTruck.onTap();
-      return;
-    }
-
-    if (this.pet.contains(x, y)) {
-      this.pet.onTap();
-      return;
-    }
-
     // Booth before stations: its hit zone overlaps the wash pad's padding and
     // a pickup tap must never be eaten by a station.
     if (this.garage.containsBooth(x, y)) {
@@ -235,11 +214,6 @@ export class Game {
     // the direct way out; the booth pickup game stays as a bonus flow.
     if (this.selectedVehicle?.status === 'parked' && this.garage.containsRoad(x, y)) {
       this.sendVehicleOut(this.selectedVehicle);
-      return;
-    }
-
-    if (this.garage.containsEntrance(x, y)) {
-      this.spawnArrival();
       return;
     }
 
@@ -287,17 +261,12 @@ export class Game {
       this.movementQueue.push({ key, kind, vehicle, start });
     }
     if (vehicle) vehicle.bounce = Math.max(vehicle.bounce, 0.45);
-    this.pet.clearForTraffic();
     this.flushMovementQueue();
     return true;
   }
 
-  hasActiveMovement() {
-    return this.vehicles.some((vehicle) => vehicle.moving) || this.towTruck.moving;
-  }
-
   canStartMovement(kind) {
-    const active = [...this.vehicles, this.towTruck].filter((vehicle) => vehicle.moving);
+    const active = this.vehicles.filter((vehicle) => vehicle.moving);
     return active.every((vehicle) => {
       const activeKind = vehicle.movementKind;
       if (!activeKind) return false;
@@ -309,12 +278,7 @@ export class Game {
   }
 
   flushMovementQueue() {
-    if (!this.movementQueue.length) {
-      if (!this.hasActiveMovement()) this.pet.releaseTraffic();
-      return;
-    }
-    this.pet.clearForTraffic();
-    if (!this.pet.trafficSafe) return;
+    if (!this.movementQueue.length) return;
     for (let index = 0; index < this.movementQueue.length;) {
       const next = this.movementQueue[index];
       if (!this.canStartMovement(next.kind)) {
@@ -324,36 +288,32 @@ export class Game {
       this.movementQueue.splice(index, 1);
       next.start();
     }
-    if (!this.hasActiveMovement() && !this.movementQueue.length) this.pet.releaseTraffic();
+  }
+
+  ensureArrival() {
+    if (this.vehicles.some((vehicle) => ['arriving', 'waiting'].includes(vehicle.status))) return false;
+    if (this.movementQueue.some((entry) => entry.kind === 'arrival')) return false;
+    return this.spawnArrival();
+  }
+
+  availableArrivalTypes() {
+    const occupied = this.garage.occupiedBayIds();
+    return VEHICLE_TYPES.filter((type) => {
+      const probe = { large: Boolean(VEHICLE_CATALOG[type].large), x: this.garage.anchors.waiting.x };
+      return Boolean(this.garage.nearestOpenBay(probe, occupied));
+    });
   }
 
   spawnArrival(forcedType = null, scheduled = false) {
-    if (this.vehicles.some((vehicle) => ['arriving', 'waiting', 'parking'].includes(vehicle.status))) {
-      const waiting = this.vehicles.find((vehicle) => vehicle.status === 'waiting');
-      if (waiting) {
-        waiting.bounce = 1;
-        this.playVehicleHorn(waiting);
-      } else this.sound.pop();
-      return false;
-    }
+    if (this.vehicles.some((vehicle) => ['arriving', 'waiting'].includes(vehicle.status))) return false;
+    const compatible = this.availableArrivalTypes();
+    if (!compatible.length) return false;
     if (!scheduled) {
-      const bell = this.garage.entrance.bell;
-      this.garage.flickerSign();
-      this.particles.sparkle(bell.x, bell.y, 8);
-      this.playSfx('doorbell', () => this.sound.pickupBell());
       return this.scheduleMovement('arrival', 'arrival', null, () => this.spawnArrival(forcedType, true));
     }
-    const occupied = this.garage.occupiedBayIds();
-    const possible = VEHICLE_TYPES.filter((type) => {
-      const probe = { large: type === 'bus' || type === 'fire', x: this.garage.anchors.waiting.x };
-      return this.garage.nearestOpenBay(probe, occupied) && !this.lastArrivalTypes.includes(type);
-    });
-    if (!possible.length) {
-      this.sound.squeak();
-      this.garage.flickerSign();
-      return false;
-    }
-    const type = forcedType && possible.includes(forcedType) ? forcedType : pick(possible);
+    const varied = compatible.filter((type) => !this.lastArrivalTypes.includes(type));
+    const possible = varied.length ? varied : compatible;
+    const type = forcedType && compatible.includes(forcedType) ? forcedType : pick(possible);
     this.lastArrivalTypes.unshift(type);
     this.lastArrivalTypes = this.lastArrivalTypes.slice(0, 2);
     const start = this.garage.anchors.arrivalStart;
@@ -367,8 +327,6 @@ export class Game {
       care: { washed: false, charged: true, tires: true },
     });
     this.vehicles.push(vehicle);
-    this.garage.openDoor();
-    this.playSfx('garage_door_open', () => this.sound.door());
     if (!this.welcomed) {
       this.welcomed = true;
       this.say('garage_welcome');
@@ -381,11 +339,10 @@ export class Game {
         vehicle.expression = 'excited';
         vehicle.expressionTime = 2;
         vehicle.bounce = 1;
-        this.garage.closeDoor();
-        this.playSfx('garage_door_close', () => this.sound.door());
         this.playVehicleHorn(vehicle);
         this.say('hello_park', vehicle);
-        this.selectVehicle(vehicle);
+        if (!this.selectedVehicle) this.selectVehicle(vehicle);
+        else this.particles.sparkle(vehicle.x, vehicle.y - 30, 5);
         this.save();
       },
     });
@@ -476,7 +433,6 @@ export class Game {
         this.playSfx('party_horns', () => this.sound.fanfare());
         this.playSfx('confetti_pop', null);
         this.particles.confetti(800, 310, 55);
-        this.pet.dance(4);
         for (const parked of this.vehicles.filter((item) => item.status === 'parked')) {
           parked.beginSurprise('headlights');
           this.playVehicleHorn(parked);
@@ -576,16 +532,7 @@ export class Game {
   // probes see each other does move order break the tie. Stationary blockers
   // always win.
   motionBlocked(vehicle) {
-    // Any direct or future movement call that did not come through the queue
-    // still waits at its validated start pose until the cat reaches refuge.
-    if (!this.pet?.trafficSafe) {
-      this.pet?.clearForTraffic();
-      return true;
-    }
     const probe = vehicle.aheadFootprint();
-    // The tow truck stays a friendly prop (not solid) until the rescue arc
-    // lands — its home pad sits inside the bay backing sweep, so treating it
-    // as an obstacle would deadlock parking maneuvers.
     for (const other of this.vehicles) {
       if (other === vehicle) continue;
       if (!polygonsOverlap(probe, other.footprint(4))) continue;
@@ -673,7 +620,6 @@ export class Game {
       const [vehicle] = candidates.splice(Math.floor(Math.random() * candidates.length), 1);
       if (idleSafeSurprise(vehicle)) return;
     }
-    this.pet.idleCharm();
   }
 
   update(dt) {
@@ -693,10 +639,9 @@ export class Game {
     }
     this.garage.update(dt);
     for (const vehicle of this.vehicles) vehicle.update(dt);
-    this.towTruck.update(dt);
-    this.pet.update(dt);
     this.particles.update(dt);
     this.flushMovementQueue();
+    this.ensureArrival();
   }
 
   draw() {
@@ -709,8 +654,6 @@ export class Game {
 
     const entries = [
       ...this.vehicles.map((vehicle) => ({ baseline: vehicle.baseline, draw: () => vehicle.draw(ctx, this.assets) })),
-      { baseline: this.towTruck.baseline, draw: () => this.towTruck.draw(ctx, this.assets) },
-      { baseline: this.pet.baseline, draw: () => this.pet.draw(ctx) },
     ];
     entries.sort((a, b) => a.baseline - b.baseline);
     for (const entry of entries) entry.draw();
@@ -734,7 +677,7 @@ export class Game {
       ctx.closePath();
       ctx.stroke();
     };
-    for (const vehicle of [...this.vehicles, this.towTruck]) {
+    for (const vehicle of this.vehicles) {
       ctx.strokeStyle = '#3dff6e';
       ctx.setLineDash([]);
       poly(vehicle.footprint());
@@ -773,12 +716,6 @@ export class Game {
     }
     const booth = this.garage.pickupBooth.hit;
     ctx.strokeRect(booth.x, booth.y, booth.w, booth.h);
-    const road = this.garage.entrance.roadZone;
-    ctx.strokeRect(road.x, road.y, road.w, road.h);
-    const bell = this.garage.entrance.bell;
-    ctx.beginPath();
-    ctx.arc(bell.x, bell.y, bell.r + 28, 0, TAU);
-    ctx.stroke();
     ctx.restore();
   }
 

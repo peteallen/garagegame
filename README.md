@@ -6,13 +6,13 @@ Play the published game at [peteallen.github.io/garagegame](https://peteallen.gi
 
 ## How to play
 
-Tap the bell by the garage door and a car drives in, greets the player, and waits on the road. Tap the waiting car and then an open bay, or drag the car into a bay, to watch it drive around and reverse into its spot. Large vehicles use the large bay when they need it.
+When an appropriate parking bay is open, the next car automatically arrives from the side of the road and waits to be directed. There is no garage door or arrival button. Tap the waiting car and then an open bay, or drag the car into a bay, to watch it drive around and reverse into its spot. Large vehicles use the large bay when they need it, and the game keeps at most one car waiting at a time.
 
 Tap a parked car and then another open bay to move it. The car pulls out and reverse-parks again; if the destination is behind it, the car drives around the block and approaches from the correct direction. Cars are solid, politely yield when their paths meet, and never wreck.
 
-Tap a parked car and then tap the road, or drag it onto the road, to send it home. The pickup booth offers a second game: tap the booth, find the car shown in the picture bubble, and tap that car for a cheerful drive-out celebration. Tap parked cars for small animated surprises, tap the garage cat for affection, and use the sun, moon, and speaker pictures to change the lighting or mute the sound.
+Tap a parked car and then tap the road, or drag it onto the road, to send it home. The pickup booth offers a second game: tap the booth, find the car shown in the picture bubble, and tap that car for a cheerful drive-out celebration. Tap parked cars for small animated surprises, and use the sun, moon, and speaker pictures to change the lighting or mute the sound.
 
-If nobody interacts for roughly a minute, one harmless parked-car or cat surprise may happen. It never creates a new car, problem, or pickup request. Parked cars, waiting cars, day or night mode, and mute preference survive a reload.
+If nobody interacts for roughly a minute, one harmless parked-car surprise may happen. It never creates a problem or pickup request; new roadside arrivals depend only on compatible parking availability. Parked cars, waiting cars, day or night mode, and mute preference survive a reload.
 
 ## Run locally
 
@@ -39,11 +39,11 @@ npm run build
 
 `src/game/Game.js` owns the main loop, input routing, persistence, vehicle coordination, audio calls, y-sorted drawing, and the one-shot idle charm. `src/game/world/Garage.js` defines the visible world, bays, road and touch zones, and every arrival, parking, repark, and exit route. `src/game/entities/Vehicle.js` renders and updates cars, while `src/game/core/VehicleMotion.js` follows and validates every cubic driving path.
 
-`src/game/entities/Pet.js` gives the garage cat its wandering, stretching, dancing, and roof-napping life. `src/game/actions/vehicleSurprises.js` contains safe weighted car reactions. `src/game/ui/Hud.js` draws the two icon-only controls, and `src/game/fx/Particles.js` supplies sparkles, hearts, foam, exhaust, and confetti.
+`src/game/actions/vehicleSurprises.js` contains safe weighted car reactions. `src/game/ui/Hud.js` draws the icon-only controls, and `src/game/fx/Particles.js` supplies sparkles, hearts, foam, exhaust, and confetti.
 
 `src/game/core/AssetLoader.js` loads optional sprites and leaves procedural fallbacks in place when art is missing. `SoundEngine.js` provides synthesized sound and the shared Web Audio graph, `Sfx.js` plays recorded effects with those synth fallbacks, and `Voice.js` selects bright, warm, or deep spoken takes for each vehicle.
 
-The complete movement, sprite-registration, asset, testing, and deployment contracts are documented in `AGENTS.md`. Service-station driving, tow rescue, and an all-done celebration are intentionally deferred and are not presented as working gameplay.
+The complete movement, sprite-registration, asset, testing, and deployment contracts are documented in `AGENTS.md`. Service-station driving, tow rescue, and an all-done celebration are intentionally deferred and are not presented as working gameplay. In particular, the tow truck stays hidden until it has a complete rescue purpose, validated routes, and an interaction a young child can understand.
 
 ## Art and audio pipelines
 
@@ -61,7 +61,7 @@ The script defaults and this table form the project model registry. Update both 
 | Image editing | `google/gemini-3.1-flash-image-preview` | PNG | `EDIT_MODEL` in `scripts/edit_image.py` | Keeps top-down vehicle edits visually consistent with their anchors. |
 | Voice generation | `openai/gpt-audio` | `shimmer` bright, `coral` warm, `ash` deep | `VOICE_MODEL` in `scripts/gen_voice.py` | Gives small cars, medium vehicles, and large trucks distinct friendly registers. |
 | Voice transcription QA | `google/gemini-3.5-flash` | Verbatim transcript | `TRANSCRIBE_MODEL` in `scripts/verify_voice.py` | Reliably catches takes where the speech model replied to a line instead of reading it. |
-| Sound effects | ElevenLabs sound generation | MP3 | `ELEVENLABS_API_KEY` or `~/.codex/.env` | Produces clean vehicle, garage, celebration, and cat recordings that Web Audio cannot convincingly synthesize. |
+| Sound effects | ElevenLabs sound generation | MP3 | `ELEVENLABS_API_KEY` or `~/.codex/.env` | Produces clean vehicle, environment, and celebration recordings that Web Audio cannot convincingly synthesize. |
 
 ## Deployment
 

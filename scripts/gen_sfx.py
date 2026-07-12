@@ -20,18 +20,13 @@ OUT.mkdir(parents=True, exist_ok=True)
 # Horn/engine keys line up with vehicleCatalog.js (horn_*/engine_*).
 SFX = {
     # world / interaction
-    "doorbell": ("One friendly two-note door bell ding-dong from a small service garage, bright and welcoming, clean isolated sound, no background noise", 1.4),
-    "garage_door_open": ("A real metal garage roll-up door opening, friendly medium rumble, rollers and a gentle latch release, clean isolated sound, no voices, no music", 2.8),
-    "garage_door_close": ("A real metal garage roll-up door closing, friendly medium rumble, rollers and a soft cushioned stop, clean isolated sound, no voices, no music", 2.8),
     "pickup_bell": ("One bright old-fashioned brass service counter bell ding, cheerful and clean, short natural decay, no voices, no background noise", 1.2),
     "backup_beeper": ("One single gentle commercial vehicle reverse warning beep, rounded toddler-friendly tone, clean isolated sound, no engine or background noise", 0.8),
-    "tow_clunk": ("A tow truck steel hook coupling securely with one satisfying padded clunk and a tiny chain jingle, clean isolated sound, no engine", 1.2),
     "siren_chirp": ("One very short friendly rescue vehicle siren chirp, two rising electronic notes, playful not alarming, clean isolated sound", 1.1),
     "alarm_chirp": ("A cute car alarm lock confirmation, exactly two short electronic chirps, friendly and clean, no siren and no background noise", 1.0),
     "confetti_pop": ("One soft festive party popper pop with fluttering paper confetti falling, gentle and celebratory, clean isolated sound, no voices", 1.5),
     "party_horns": ("A tiny joyful chorus of friendly vehicle horns celebrating together, three short harmonious honks with a cheerful finish, no music or voices", 2.8),
     "car_snore": ("A tiny cartoon car snoring softly, two gentle rounded snores with a little whistling exhale, cute and quiet, no background noise", 2.4),
-    "cat_chirp": ("One sweet small garage cat greeting chirp, curious and affectionate, very short clean isolated vocalization, no purring or background noise", 1.0),
     # stations
     "wash_brushes": ("Soft rotating automatic car wash brushes swishing rhythmically against a car, wet foam and plush bristles, steady looping texture, no voices", 4.0),
     "water_spray": ("A broad car wash water spray sweeping across a vehicle, bright droplets and gentle splashing, clean isolated sound, no voices", 2.8),
@@ -49,7 +44,6 @@ SFX = {
     "horn_icecream": ("One whimsical two-note ice cream truck horn greeting, bright bell-like tones, not a recognizable song, clean isolated sound", 1.4),
     "horn_ev": ("One short soft futuristic electric car greeting chime, bright rounded two-note tone, clean isolated sound, no engine", 1.0),
     "horn_bus": ("One short deep school bus horn toot, warm rounded and child-friendly, clean isolated sound, no engine or traffic", 1.2),
-    "horn_tow": ("One short sturdy tow truck horn toot, medium-low friendly tone with a tiny mechanical character, clean isolated sound", 1.1),
     # engines — shared by weight class (see vehicleCatalog.js engine keys)
     "engine_sports": ("A small sporty car engine giving one playful smooth rev up and settling down, polished and friendly, clean isolated sound", 2.8),
     "engine_pickup": ("A friendly pickup truck gasoline engine starting and giving one warm medium-low rev, smooth clean isolated sound", 3.0),

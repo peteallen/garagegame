@@ -1,4 +1,4 @@
-import { clamp, damp, pointInRect, roundRect, TAU } from '../core/math.js';
+import { clamp, pointInRect, roundRect, TAU } from '../core/math.js';
 
 export const WORLD_W = 1600;
 export const WORLD_H = 900;
@@ -8,9 +8,6 @@ const point = (x, y) => ({ x, y });
 export class Garage {
   constructor(game) {
     this.game = game;
-    this.doorOpen = 0;
-    this.doorTarget = 0;
-    this.signFlicker = 0;
     this.cloudOffset = 0;
     this.puddleRipple = 0;
     this.petBounds = { minX: 280, maxX: 1180, minY: 585, maxY: 705 };
@@ -19,11 +16,6 @@ export class Garage {
       waiting: { x: 175, y: 760, heading: 0 },
       towHome: { x: 860, y: 842, heading: 0 },
       exit: { x: 1760, y: 760, heading: 0 },
-    };
-    this.entrance = {
-      door: { x: 20, y: 510, w: 220, h: 230 },
-      bell: { x: 105, y: 620, r: 68 },
-      roadZone: { x: 0, y: 690, w: 245, h: 185 },
     };
     this.pickupBooth = { x: 1490, y: 600, w: 105, h: 160, hit: { x: 1430, y: 530, w: 170, h: 250 } };
     // Keep service equipment off the playfield until its validated driving
@@ -57,15 +49,9 @@ export class Garage {
   }
 
   update(dt) {
-    this.doorOpen = damp(this.doorOpen, this.doorTarget, 4.8, dt);
     this.cloudOffset = (this.cloudOffset + dt * 7) % (WORLD_W + 400);
     this.puddleRipple += dt;
-    this.signFlicker = damp(this.signFlicker, 0, 7, dt);
   }
-
-  openDoor() { this.doorTarget = 1; }
-  closeDoor() { this.doorTarget = 0; }
-  flickerSign() { this.signFlicker = 1; }
 
   bayById(id) {
     return this.bays.find((bay) => bay.id === id) || null;
@@ -104,11 +90,6 @@ export class Garage {
   hitStation(x, y) {
     if (!this.serviceStationsEnabled) return null;
     return this.stations.find((station) => pointInRect(x, y, station.hit, 22)) || null;
-  }
-
-  containsEntrance(x, y) {
-    const bell = this.entrance.bell;
-    return Math.hypot(x - bell.x, y - bell.y) <= bell.r + 28 || pointInRect(x, y, this.entrance.roadZone);
   }
 
   containsBooth(x, y) {
@@ -361,7 +342,6 @@ export class Garage {
     }
     this.drawBuilding(ctx, night);
     this.drawBays(ctx, night);
-    this.drawEntrance(ctx, night);
     if (this.serviceStationsEnabled) this.drawStationsBase(ctx, night);
     this.drawBooth(ctx, night);
     this.drawAmbientDetails(ctx, night);
@@ -460,10 +440,10 @@ export class Garage {
       }
       ctx.drawImage(sprite, 198, 41, 1070, 561);
       ctx.restore();
-      if (this.signFlicker > 0.02 || night) {
-        // Warm glow over the painted bulb strip: flicker on demand, steady at night.
+      if (night) {
+        // Warm steady glow over the painted bulb strip at night.
         ctx.save();
-        ctx.globalAlpha = night ? 0.28 + this.signFlicker * 0.4 : this.signFlicker * 0.55;
+        ctx.globalAlpha = 0.28;
         ctx.fillStyle = '#ffde7a';
         ctx.globalCompositeOperation = 'lighter';
         roundRect(ctx, 240, 66, 986, 78, 34);
@@ -487,7 +467,7 @@ export class Garage {
     ctx.fill();
     ctx.fillStyle = night ? '#f4d66e' : '#ffe39a';
     for (let x = 235; x < 1230; x += 64) {
-      ctx.globalAlpha = night ? 0.8 + this.signFlicker * 0.2 : 0.85;
+      ctx.globalAlpha = night ? 0.8 : 0.85;
       roundRect(ctx, x, 180, 38, 15, 7);
       ctx.fill();
     }
@@ -529,80 +509,6 @@ export class Garage {
         ctx.globalAlpha = 1;
       }
     }
-  }
-
-  drawEntrance(ctx, night) {
-    const doorSprite = this.sprite('door');
-    if (doorSprite) {
-      // Painted frame with an open interior; the animated slats draw inside
-      // the interior region measured from the art.
-      const width = 296;
-      const height = width * (doorSprite.height / doorSprite.width);
-      ctx.drawImage(doorSprite, 8, 745 - height, width, height);
-      const slat = { x: 52, y: 546, w: 210, h: 178 };
-      const doorHeight = slat.h * (1 - this.doorOpen);
-      if (doorHeight > 2) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(slat.x, slat.y, slat.w, doorHeight);
-        ctx.clip();
-        for (let y = slat.y; y < slat.y + slat.h + 26; y += 26) {
-          ctx.fillStyle = (Math.floor(y / 26) % 2) ? '#75aebb' : '#86bdc7';
-          roundRect(ctx, slat.x + 2, y, slat.w - 4, 21, 4);
-          ctx.fill();
-        }
-        ctx.restore();
-      }
-    } else {
-      ctx.fillStyle = night ? '#254052' : '#315967';
-      roundRect(ctx, 14, 500, 225, 245, 30);
-      ctx.fill();
-      ctx.fillStyle = night ? '#142a3b' : '#25444f';
-      roundRect(ctx, 26, 518, 200, 215, 22);
-      ctx.fill();
-
-      const doorHeight = 190 * (1 - this.doorOpen);
-      if (doorHeight > 2) {
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(32, 524, 188, doorHeight);
-        ctx.clip();
-        for (let y = 528; y < 724; y += 27) {
-          ctx.fillStyle = (Math.floor(y / 27) % 2) ? '#75aebb' : '#86bdc7';
-          roundRect(ctx, 34, y, 184, 22, 4);
-          ctx.fill();
-        }
-        ctx.restore();
-      }
-    }
-
-    const bell = this.entrance.bell;
-    const bellSprite = this.sprite('bell');
-    if (bellSprite) {
-      const size = bell.r * 2 + 8;
-      ctx.drawImage(bellSprite, bell.x - size / 2, bell.y - size / 2, size, size);
-    } else {
-      ctx.fillStyle = '#ffd860';
-      ctx.beginPath();
-      ctx.arc(bell.x, bell.y, bell.r, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#d85346';
-      ctx.beginPath();
-      ctx.arc(bell.x, bell.y, 46, 0, TAU);
-      ctx.fill();
-      ctx.fillStyle = '#fff4c9';
-      ctx.beginPath();
-      ctx.arc(bell.x, bell.y, 14, 0, TAU);
-      ctx.fill();
-    }
-    const pulse = (this.game.time * 1.5) % 1;
-    ctx.strokeStyle = 'rgba(255,255,255,.85)';
-    ctx.lineWidth = 7;
-    ctx.globalAlpha = 1 - pulse;
-    ctx.beginPath();
-    ctx.arc(bell.x, bell.y, 78 + pulse * 28, -0.7, 0.7);
-    ctx.stroke();
-    ctx.globalAlpha = 1;
   }
 
   drawStationsBase(ctx, night) {
