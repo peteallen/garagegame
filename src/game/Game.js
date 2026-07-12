@@ -109,29 +109,36 @@ export class Game {
     };
   }
 
-  onPointerDown(clientX, clientY) {
+  ownsPointer(pointerId) {
+    return Boolean(this.pointer) && pointerId === this.pointer.id;
+  }
+
+  onPointerDown(clientX, clientY, pointerId = null) {
+    if (this.pointer) return false;
     this.notePlayerActivity();
     this.sound.unlock();
     this.splashTime = Math.min(this.splashTime, 0.45);
     const point = this.toWorld(clientX, clientY);
     const vehicle = this.vehicleAt(point.x, point.y);
-    this.pointer = { start: point, point, time: performance.now(), vehicle };
+    this.pointer = { id: pointerId, start: point, point, time: performance.now(), vehicle };
+    return true;
   }
 
-  onPointerMove(clientX, clientY) {
+  onPointerMove(clientX, clientY, pointerId = null) {
+    if (!this.ownsPointer(pointerId)) return false;
     this.notePlayerActivity();
-    if (!this.pointer) return;
     const point = this.toWorld(clientX, clientY);
     this.pointer.point = point;
     if (['waiting', 'parked'].includes(this.pointer.vehicle?.status) && dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y) > 24) {
       this.dragVehicle = this.pointer.vehicle;
       this.dragBay = this.garage.hitBay(point.x, point.y);
     }
+    return true;
   }
 
-  onPointerUp(clientX, clientY) {
+  onPointerUp(clientX, clientY, pointerId = null) {
+    if (!this.ownsPointer(pointerId)) return false;
     this.notePlayerActivity();
-    if (!this.pointer) return;
     const point = this.toWorld(clientX, clientY);
     const moved = dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y);
     if (this.dragVehicle) {
@@ -155,10 +162,19 @@ export class Game {
         this.selectedVehicle = vehicle;
         this.particles.sparkle(vehicle.x, vehicle.y - 20, 5);
       }
-      return;
+      return true;
     }
     this.pointer = null;
     if (moved < 32) this.tap(point.x, point.y);
+    return true;
+  }
+
+  onPointerCancel(pointerId = null) {
+    if (!this.ownsPointer(pointerId)) return false;
+    this.dragVehicle = null;
+    this.dragBay = null;
+    this.pointer = null;
+    return true;
   }
 
   tap(x, y) {

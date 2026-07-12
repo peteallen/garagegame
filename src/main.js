@@ -14,12 +14,12 @@ window.addEventListener('resize', resize, { passive: true });
 window.addEventListener('orientationchange', resize, { passive: true });
 
 canvas.addEventListener('pointerdown', (event) => {
-  canvas.setPointerCapture?.(event.pointerId);
-  game.onPointerDown(event.clientX, event.clientY);
+  const accepted = game.onPointerDown(event.clientX, event.clientY, event.pointerId);
+  if (accepted) canvas.setPointerCapture?.(event.pointerId);
 });
-canvas.addEventListener('pointermove', (event) => game.onPointerMove(event.clientX, event.clientY));
-canvas.addEventListener('pointerup', (event) => game.onPointerUp(event.clientX, event.clientY));
-canvas.addEventListener('pointercancel', (event) => game.onPointerUp(event.clientX, event.clientY));
+canvas.addEventListener('pointermove', (event) => game.onPointerMove(event.clientX, event.clientY, event.pointerId));
+canvas.addEventListener('pointerup', (event) => game.onPointerUp(event.clientX, event.clientY, event.pointerId));
+canvas.addEventListener('pointercancel', (event) => game.onPointerCancel(event.pointerId));
 canvas.addEventListener('contextmenu', (event) => event.preventDefault());
 
 if (import.meta.hot) {
