@@ -1,0 +1,15 @@
+{
+  "name": "Beep Beep Garage!",
+  "short_name": "Beep Beep Garage",
+  "description": "A gentle, playful parking garage for little drivers.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "fullscreen",
+  "orientation": "landscape",
+  "background_color": "#18354a",
+  "theme_color": "#18354a",
+  "icons": [
+    { "src": "./icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "./icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
