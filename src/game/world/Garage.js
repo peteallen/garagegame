@@ -9,12 +9,13 @@ export class Garage {
   constructor(game) {
     this.game = game;
     this.cloudOffset = 0;
-    this.puddleRipple = 0;
     this.petBounds = { minX: 280, maxX: 1180, minY: 585, maxY: 705 };
     this.anchors = {
       arrivalStart: { x: -170, y: 760, heading: 0 },
       waiting: { x: 175, y: 760, heading: 0 },
-      towHome: { x: 860, y: 842, heading: 0 },
+      // The tow truck lives below the moving road lane, clear of even the
+      // school bus's body sweep, while remaining mostly visible and tappable.
+      towHome: { x: 1470, y: 870, heading: Math.PI },
       exit: { x: 1760, y: 760, heading: 0 },
     };
     this.pickupBooth = { x: 1490, y: 600, w: 105, h: 160, hit: { x: 1430, y: 530, w: 170, h: 250 } };
@@ -50,7 +51,6 @@ export class Garage {
 
   update(dt) {
     this.cloudOffset = (this.cloudOffset + dt * 7) % (WORLD_W + 400);
-    this.puddleRipple += dt;
   }
 
   bayById(id) {
@@ -170,87 +170,108 @@ export class Garage {
   }
 
   towApproachPath(tow, vehicle, bay) {
-    const approachX = bay.park.x - 145;
-    const backing = point(bay.park.x + 92, 832);
-    const path = [];
+    const radius = tow.config.minTurnRadius + 25;
+    const kappa = 0.5522848;
+    const laneY = 810;
     const start = point(tow.x, tow.y);
-    path.push({
+    const turnStart = point(bay.park.x + radius, laneY);
+    const horizontalRun = Math.max(1, start.x - turnStart.x);
+    const control = clamp(horizontalRun * 0.3, 72, 190);
+    const backing = point(bay.park.x, laneY + radius);
+    const hook = this.towHookPose(tow, vehicle, bay);
+    return [{
       p0: start,
-      p1: point(start.x - 120, start.y),
-      p2: point(approachX + 105, 760),
-      p3: point(approachX, 760),
+      p1: point(start.x - control, start.y),
+      p2: point(turnStart.x + control, turnStart.y),
+      p3: turnStart,
       direction: 1,
-      speed: tow.config.speed,
-    });
-    path.push({
-      p0: path.at(-1).p3,
-      p1: point(approachX + 95, 760),
-      p2: point(backing.x, 750),
+      speed: 300,
+      cue: 'tow-dispatch',
+    }, {
+      p0: turnStart,
+      p1: point(turnStart.x - radius * kappa, turnStart.y),
+      p2: point(backing.x, backing.y - radius * kappa),
       p3: backing,
       direction: 1,
-      speed: 125,
-    });
-    path.push({
+      speed: 270,
+    }, {
       p0: backing,
-      p1: point(backing.x, 748),
-      p2: point(bay.park.x + 28, 675),
-      p3: point(bay.park.x + 28, 648),
+      p1: point(backing.x, backing.y - 100),
+      p2: point(hook.x, hook.y + 100),
+      p3: hook,
       direction: -1,
-      speed: 68,
+      speed: 125,
       cue: 'tow-reverse',
-    });
-    return path;
-  }
-
-  towServicePath(tow, vehicle, bay, station) {
-    const start = point(tow.x, tow.y);
-    const path = [{
-      p0: start,
-      p1: point(start.x, 715),
-      p2: point(start.x + 45, 760),
-      p3: point(start.x + 145, 760),
-      direction: 1,
-      speed: 105,
     }];
-    const laneStart = path.at(-1).p3;
-    const entryX = Math.max(laneStart.x + 35, station.pose.x - 260);
-    if (entryX > laneStart.x + 3) path.push(straight(laneStart, point(entryX, 760), 110));
-    const p0 = path.at(-1).p3;
-    path.push({
-      p0,
-      p1: point(p0.x + 95, p0.y),
-      p2: point(station.pose.x - 125, station.pose.y),
-      p3: point(station.pose.x, station.pose.y),
-      direction: 1,
-      speed: 90,
-      cue: `tow-${station.id}`,
-    });
-    return path;
   }
 
-  towReturnPath(tow, vehicle, station, bay) {
-    return this.offscreenLoopToBay(tow, point(station.pose.x, station.pose.y), bay, { towing: true });
+  towHookPose(tow, vehicle, bay) {
+    const gap = vehicle.config.length / 2 + tow.config.length / 2 + 20;
+    return point(bay.park.x, bay.park.y + gap);
   }
 
-  towHomePath(tow, bay) {
+  towAwayPaths(tow, vehicle) {
+    // Both actors cover exactly the same displacement in exactly the same
+    // time. They remain visibly coupled while each independently follows a
+    // validated motion path; no frame-by-frame pose copying is involved.
+    const targetEndY = 1120;
+    const displacement = targetEndY - vehicle.y;
+    const duration = displacement / 190;
+    const targetEnd = point(vehicle.x, targetEndY);
+    const towEnd = point(tow.x, tow.y + displacement);
+    return {
+      target: [straight(point(vehicle.x, vehicle.y), targetEnd, 190, { duration, cue: 'tow-away' })],
+      tow: [straight(point(tow.x, tow.y), towEnd, 190, { duration, cue: 'tow-away' })],
+    };
+  }
+
+  towHomePath(tow) {
     const start = point(tow.x, tow.y);
-    const laneX = bay.park.x + 165;
+    const radius = 180;
+    const kappa = 0.5522848;
+    const bottom = point(start.x, 1450);
+    const lowerRight = point(start.x + radius, 1450 + radius);
+    const farRight = point(1850, lowerRight.y);
+    const upperRight = point(2030, 1450);
+    const rightEntry = point(2030, 950);
+    const leftEntry = point(1850, 770);
+    const home = this.anchors.towHome;
     return [
+      straight(start, bottom, 520),
       {
-        p0: start,
-        p1: point(start.x, 720),
-        p2: point(laneX - 70, 760),
-        p3: point(laneX, 760),
+        p0: bottom,
+        p1: point(bottom.x, bottom.y + radius * kappa),
+        p2: point(lowerRight.x - radius * kappa, lowerRight.y),
+        p3: lowerRight,
         direction: 1,
-        speed: 110,
+        speed: 520,
+      },
+      straight(lowerRight, farRight, 540),
+      {
+        p0: farRight,
+        p1: point(farRight.x + radius * kappa, farRight.y),
+        p2: point(upperRight.x, upperRight.y + radius * kappa),
+        p3: upperRight,
+        direction: 1,
+        speed: 520,
+      },
+      straight(upperRight, rightEntry, 540),
+      {
+        p0: rightEntry,
+        p1: point(rightEntry.x, rightEntry.y - radius * kappa),
+        p2: point(leftEntry.x + radius * kappa, leftEntry.y),
+        p3: leftEntry,
+        direction: 1,
+        speed: 520,
       },
       {
-        p0: point(laneX, 760),
-        p1: point(laneX + 180, 760),
-        p2: point(this.anchors.towHome.x + 90, this.anchors.towHome.y),
-        p3: point(this.anchors.towHome.x, this.anchors.towHome.y),
+        p0: leftEntry,
+        p1: point(leftEntry.x - 130, leftEntry.y),
+        p2: point(home.x + 130, home.y),
+        p3: point(home.x, home.y),
         direction: 1,
-        speed: tow.config.speed,
+        speed: 520,
+        cue: 'tow-home',
       },
     ];
   }
@@ -344,7 +365,6 @@ export class Garage {
     this.drawBays(ctx, night);
     if (this.serviceStationsEnabled) this.drawStationsBase(ctx, night);
     this.drawBooth(ctx, night);
-    this.drawAmbientDetails(ctx, night);
     if (night && ground) {
       // Painted world goes dark with one tint pass; vehicles draw after this
       // so their lights stay bright. The stars were already laid into the sky
@@ -692,17 +712,6 @@ export class Garage {
     ctx.restore();
   }
 
-  drawAmbientDetails(ctx, night) {
-    ctx.fillStyle = night ? 'rgba(91,143,164,.28)' : 'rgba(132,211,228,.34)';
-    ctx.beginPath();
-    ctx.ellipse(355, 858, 170, 22 + Math.sin(this.puddleRipple * 2) * 2, 0.02, 0, TAU);
-    ctx.fill();
-    ctx.strokeStyle = night ? 'rgba(180,219,228,.2)' : 'rgba(255,255,255,.35)';
-    ctx.lineWidth = 3;
-    ctx.beginPath();
-    ctx.ellipse(355, 858, 85 + Math.sin(this.puddleRipple * 3) * 18, 9, 0.02, 0, TAU);
-    ctx.stroke();
-  }
 }
 
 function makeBay(id, x, w, large) {

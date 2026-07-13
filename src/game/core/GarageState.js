@@ -85,7 +85,7 @@ export function saveGarageState(game) {
       isNight: Boolean(game.isNight),
       nextVehicleId: game.nextVehicleId,
       vehicles: game.vehicles
-        .filter((vehicle) => vehicle.status !== 'exiting')
+        .filter((vehicle) => !['exiting', 'towed'].includes(vehicle.status))
         .slice(0, MAX_VEHICLES)
         .map((vehicle) => vehicle.serialize()),
     };

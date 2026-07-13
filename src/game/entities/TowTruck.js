@@ -4,84 +4,113 @@ import { TOW_TRUCK_CONFIG } from './vehicleCatalog.js';
 
 export class TowTruck extends Vehicle {
   constructor(game, data = {}) {
+    const home = game?.garage?.anchors?.towHome || { x: 1470, y: 870, heading: Math.PI };
     super(game, {
       id: 'tow-truck',
       type: 'tow',
       config: TOW_TRUCK_CONFIG,
       status: 'home',
-      x: data.x ?? 1370,
-      y: data.y ?? 728,
-      heading: data.heading ?? Math.PI,
+      x: data.x ?? home.x,
+      y: data.y ?? home.y,
+      heading: data.heading ?? home.heading,
       care: { washed: true, charged: true, tires: true },
     });
-    this.home = { x: this.x, y: this.y, heading: this.heading };
+    this.home = { ...home };
+    this.armed = false;
     this.beacon = 0;
     this.hook = 0;
     this.hookTarget = 0;
-    this.tapTime = 0;
     this.towing = null;
-    this.problemTarget = null;
+    this.rescueTarget = null;
   }
 
   get available() {
-    return !this.moving && !this.towing && this.status === 'home';
+    return !this.moving && !this.towing && !this.rescueTarget && this.status === 'home';
   }
 
-  contains(x, y, padding = 26) {
+  get busy() {
+    return !['home', 'armed'].includes(this.status);
+  }
+
+  get engaged() {
+    return this.armed || this.busy || Boolean(this.rescueTarget);
+  }
+
+  contains(x, y, padding = 28) {
     return super.contains(x, y, padding);
   }
 
-  onTap() {
-    this.tapTime = 2.6;
-    this.beacon = 1;
-    this.hookTarget = 1;
+  arm() {
+    if (!this.available) return false;
+    this.armed = true;
+    this.status = 'armed';
+    this.selected = true;
     this.expression = 'excited';
-    this.expressionTime = 2.6;
-    this.beginSurprise('hop');
-    this.game?.playVehicleHorn?.(this);
-    this.game?.particles?.hearts?.(this.x, this.y - 48, 4);
-    this.game?.particles?.sparkle?.(this.x - 90, this.y - 10, 7);
-  }
-
-  summon(target) {
-    this.problemTarget = target;
-    this.beacon = 1;
-    this.expression = 'excited';
-  }
-
-  attach(vehicle) {
-    if (!vehicle) return false;
-    this.towing = vehicle;
-    vehicle.status = 'towed';
-    vehicle.motion.stop();
-    vehicle.selected = false;
-    this.hookTarget = 1;
-    this.game?.sound?.towClunk?.();
+    this.expressionTime = 1.2;
+    this.bounce = Math.max(this.bounce, 0.7);
+    this.game?.sound?.ack?.();
+    this.game?.particles?.sparkle?.(this.x, this.y - 42, 8);
     return true;
   }
 
-  detach() {
-    const vehicle = this.towing;
-    this.towing = null;
+  cancelArm() {
+    if (!this.armed || this.moving) return false;
+    this.armed = false;
+    this.status = 'home';
+    this.selected = false;
+    this.rescueTarget = null;
     this.hookTarget = 0;
-    if (vehicle) vehicle.status = 'service';
+    this.game?.sound?.pop?.();
+    return true;
+  }
+
+  queueRescue(target) {
+    if (!this.armed || this.moving || this.rescueTarget || target?.status !== 'parked') return false;
+    this.armed = false;
+    this.selected = false;
+    this.status = 'tow-queued';
+    this.rescueTarget = target;
+    this.expression = 'excited';
+    this.expressionTime = 2;
+    this.hookTarget = 1;
+    this.game?.particles?.sparkle?.(target.x, target.y - 38, 10);
+    return true;
+  }
+
+  attach(vehicle) {
+    if (!vehicle || vehicle !== this.rescueTarget || vehicle.moving) return false;
+    this.towing = vehicle;
+    vehicle.status = 'towed';
+    vehicle.selected = false;
+    this.hookTarget = 1;
+    this.game?.playSfx?.('tow_clunk', () => this.game.sound.towClunk());
+    this.game?.particles?.sparkle?.(vehicle.x, vehicle.y + vehicle.config.length * 0.48, 9);
+    return true;
+  }
+
+  releaseTarget() {
+    const vehicle = this.towing || this.rescueTarget;
+    this.towing = null;
+    this.rescueTarget = null;
+    this.hookTarget = 0;
     return vehicle;
+  }
+
+  finishHome() {
+    this.releaseTarget();
+    this.armed = false;
+    this.selected = false;
+    this.status = 'home';
+    this.movementKind = null;
+    this.expression = 'happy';
+    this.bounce = 0.7;
   }
 
   update(dt) {
     super.update(dt);
-    this.tapTime = Math.max(0, this.tapTime - dt);
-    const showingOff = this.tapTime > 0;
-    this.beacon = damp(this.beacon, this.status === 'home' && !showingOff ? 0 : 1, 4, dt);
-    if (!this.towing && !this.problemTarget) this.hookTarget = showingOff ? 1 : 0;
+    const active = this.armed || this.busy || Boolean(this.rescueTarget);
+    this.beacon = damp(this.beacon, active ? 1 : 0, active ? 8 : 4, dt);
     this.hook = damp(this.hook, this.hookTarget, 7, dt);
-    if (this.towing) {
-      const gap = (this.config.length + this.towing.config.length) * 0.49 + 26;
-      this.towing.x = this.x - Math.cos(this.heading) * gap;
-      this.towing.y = this.y - Math.sin(this.heading) * gap;
-      this.towing.heading = this.heading;
-      this.towing.flash = 0.4 + Math.sin(this.t * 4) * 0.35;
-    }
   }
 
   // The boom base and stripe belong to the painted body; the cable, hook and
@@ -123,7 +152,7 @@ export class TowTruck extends Vehicle {
       ctx.globalAlpha = 0.45 + this.beacon * 0.5;
       ctx.fillStyle = blink ? '#ffbf3e' : '#ff6b43';
       ctx.shadowColor = ctx.fillStyle;
-      ctx.shadowBlur = 20;
+      ctx.shadowBlur = this.game?.reducedCanvasEffects ? 0 : 20;
       ctx.beginPath();
       ctx.arc(12, -width * 0.52, 10, 0, TAU);
       ctx.fill();

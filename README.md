@@ -12,6 +12,8 @@ Tap a parked car and then another open bay to move it. The car pulls out and rev
 
 Tap a parked car and then tap the road, or drag it onto the road, to send it home. The pickup booth offers a second game: tap the booth, find the car shown in the picture bubble, and tap that car for a cheerful drive-out celebration. Tap parked cars for small animated surprises, and use the sun, moon, and speaker pictures to change the lighting or mute the sound.
 
+The tow truck has one simple rescue job. Tap the tow truck to activate it, then tap any parked car. The truck follows validated driving paths as it backs up to that car, connects its hook, tows the car safely offscreen, and returns to its own parking spot.
+
 If nobody interacts for roughly a minute, one harmless parked-car surprise may happen. It never creates a problem or pickup request; new roadside arrivals depend only on compatible parking availability. Parked cars, waiting cars, day or night mode, and mute preference survive a reload.
 
 ## Run locally
@@ -39,11 +41,11 @@ npm run build
 
 `src/game/Game.js` owns the main loop, input routing, persistence, vehicle coordination, audio calls, y-sorted drawing, and the one-shot idle charm. `src/game/world/Garage.js` defines the visible world, bays, road and touch zones, and every arrival, parking, repark, and exit route. `src/game/entities/Vehicle.js` renders and updates cars, while `src/game/core/VehicleMotion.js` follows and validates every cubic driving path.
 
-`src/game/actions/vehicleSurprises.js` contains safe weighted car reactions. `src/game/ui/Hud.js` draws the icon-only controls, and `src/game/fx/Particles.js` supplies sparkles, hearts, foam, exhaust, and confetti.
+`src/game/Game.js` orchestrates the rescue sequence, while `src/game/entities/TowTruck.js` owns the truck's activation, hook, beacon, and rescue state. Both the truck and hooked car follow validated motion paths while they leave together. `src/game/actions/vehicleSurprises.js` contains safe weighted car reactions. `src/game/ui/Hud.js` draws the icon-only controls, and `src/game/fx/Particles.js` supplies sparkles, hearts, foam, exhaust, and confetti.
 
 `src/game/core/AssetLoader.js` loads optional sprites and leaves procedural fallbacks in place when art is missing. `SoundEngine.js` provides synthesized sound and the shared Web Audio graph, `Sfx.js` plays recorded effects with those synth fallbacks, and `Voice.js` selects bright, warm, or deep spoken takes for each vehicle.
 
-The complete movement, sprite-registration, asset, testing, and deployment contracts are documented in `AGENTS.md`. Service-station driving, tow rescue, and an all-done celebration are intentionally deferred and are not presented as working gameplay. In particular, the tow truck stays hidden until it has a complete rescue purpose, validated routes, and an interaction a young child can understand.
+The complete movement, sprite-registration, asset, testing, and deployment contracts are documented in `AGENTS.md`. The tow rescue is complete and visible; its truck, target car, and return trip all use validated routes. Service-station driving and an all-done celebration remain intentionally deferred and are not presented as working gameplay.
 
 ## Art and audio pipelines
 

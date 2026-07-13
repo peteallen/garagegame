@@ -1,5 +1,6 @@
 import { Garage, WORLD_H, WORLD_W } from './world/Garage.js';
 import { Vehicle } from './entities/Vehicle.js';
+import { TowTruck } from './entities/TowTruck.js';
 import { VEHICLE_CATALOG, VEHICLE_TYPES } from './entities/vehicleCatalog.js';
 import { Particles } from './fx/Particles.js';
 import { Hud } from './ui/Hud.js';
@@ -7,7 +8,7 @@ import { loadGarageState, saveGarageState } from './core/GarageState.js';
 import { SoundEngine } from './core/SoundEngine.js';
 import { Sfx } from './core/Sfx.js';
 import { Voice } from './core/Voice.js';
-import { cubicPoint, polygonsOverlap } from './core/VehicleMotion.js';
+import { cubicPoint, polygonsOverlap, validateMotionPath } from './core/VehicleMotion.js';
 import { clamp, dist, pick, rand, roundRect, TAU } from './core/math.js';
 import { idleSafeSurprise, triggerVehicleSurprise } from './actions/vehicleSurprises.js';
 
@@ -18,6 +19,7 @@ const IDLE_CHARM_MAX = 60;
 export class Game {
   constructor(canvas, assets = null) {
     this.canvas = canvas;
+    this.debug = new URLSearchParams(location.search).has('debug');
     this.ctx = canvas.getContext('2d');
     this.assets = assets;
     // Firefox's canvas backend makes large blurred shadows and full-screen
@@ -43,12 +45,12 @@ export class Game {
     this.idleCharmArmed = true;
     this.particles = new Particles();
     this.garage = new Garage(this);
+    this.towTruck = new TowTruck(this);
     const saved = loadGarageState(this.garage);
     this.isNight = saved.isNight;
     this.nextVehicleId = saved.nextVehicleId;
     this.vehicles = saved.vehicles.map((data) => new Vehicle(this, data));
     this.hud = new Hud(this);
-    this.debug = new URLSearchParams(location.search).has('debug');
     this.ensureArrival();
 
     this.resize();
@@ -125,7 +127,8 @@ export class Game {
     this.notePlayerActivity();
     const point = this.toWorld(clientX, clientY);
     this.pointer.point = point;
-    if (['waiting', 'parked'].includes(this.pointer.vehicle?.status) && dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y) > 24) {
+    const towReturnParking = this.towTruck.status === 'tow-returning' && this.pointer.vehicle?.status === 'waiting';
+    if ((!this.towTruck.engaged || towReturnParking) && ['waiting', 'parked'].includes(this.pointer.vehicle?.status) && dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y) > 24) {
       this.dragVehicle = this.pointer.vehicle;
       this.dragBay = this.garage.hitBay(point.x, point.y);
     }
@@ -137,6 +140,14 @@ export class Game {
     this.notePlayerActivity();
     const point = this.toWorld(clientX, clientY);
     const moved = dist(point.x, point.y, this.pointer.start.x, this.pointer.start.y);
+    if (this.towTruck.armed && this.pointer.vehicle) {
+      const vehicle = this.pointer.vehicle;
+      this.dragVehicle = null;
+      this.dragBay = null;
+      this.pointer = null;
+      this.tapVehicle(vehicle);
+      return true;
+    }
     if (this.dragVehicle) {
       const vehicle = this.dragVehicle;
       const bay = this.dragBay || this.garage.hitBay(point.x, point.y);
@@ -176,9 +187,35 @@ export class Game {
   tap(x, y) {
     if (this.hud.onTap(x, y)) return;
 
+    if (this.towTruck.contains(x, y)) {
+      this.tapTowTruck();
+      return;
+    }
+
+    if (this.towTruck.busy && this.towTruck.status !== 'tow-returning') {
+      this.sound.pop();
+      return;
+    }
+
     const vehicle = this.vehicleAt(x, y);
     if (vehicle) {
       this.tapVehicle(vehicle);
+      return;
+    }
+
+    if (this.towTruck.armed) {
+      this.sound.squeak();
+      this.towTruck.bounce = Math.max(this.towTruck.bounce, 0.45);
+      return;
+    }
+
+    if (this.towTruck.status === 'tow-returning') {
+      const bay = this.garage.hitBay(x, y);
+      const waiting = this.selectedVehicle?.status === 'waiting'
+        ? this.selectedVehicle
+        : this.vehicles.find((item) => item.status === 'waiting');
+      if (bay && waiting) this.parkVehicle(waiting, bay);
+      else this.sound.pop();
       return;
     }
 
@@ -222,6 +259,19 @@ export class Game {
   }
 
   tapVehicle(vehicle) {
+    if (this.towTruck.armed) {
+      if (vehicle.status === 'parked') this.startTowRescue(vehicle);
+      else {
+        vehicle.reactNotMe();
+        this.sound.squeak();
+      }
+      return;
+    }
+    if (this.towTruck.busy) {
+      if (this.towTruck.status === 'tow-returning' && vehicle.status === 'waiting') this.selectVehicle(vehicle);
+      else this.sound.pop();
+      return;
+    }
     if (this.pickupRequest) {
       if (vehicle === this.pickupRequest) this.pickupVehicle(vehicle);
       else vehicle.reactNotMe();
@@ -251,7 +301,131 @@ export class Game {
     this.particles.sparkle(vehicle.x, vehicle.y - 30, 5);
   }
 
+  tapTowTruck() {
+    if (this.towTruck.armed) {
+      this.towTruck.cancelArm();
+      return true;
+    }
+    if (this.towTruck.available) {
+      if (!this.vehicles.some((vehicle) => vehicle.status === 'parked')) {
+        this.towTruck.bounce = Math.max(this.towTruck.bounce, 0.55);
+        this.sound.squeak();
+        return false;
+      }
+      if (this.selectedVehicle) this.selectedVehicle.deselect();
+      this.selectedVehicle = null;
+      this.pickupRequest = null;
+      return this.towTruck.arm();
+    }
+    this.towTruck.bounce = Math.max(this.towTruck.bounce, 0.35);
+    this.sound.pop();
+    return false;
+  }
+
+  startTowRescue(vehicle, scheduled = false) {
+    if (!vehicle || vehicle.status !== 'parked') return false;
+    if (!scheduled) {
+      if (!this.towTruck.queueRescue(vehicle)) return false;
+      if (this.selectedVehicle === vehicle) this.selectedVehicle = null;
+      if (this.pickupRequest === vehicle) this.pickupRequest = null;
+      vehicle.deselect();
+      return this.scheduleMovement(
+        'tow-rescue',
+        'tow',
+        vehicle,
+        () => this.startTowRescue(vehicle, true),
+      );
+    }
+    if (this.towTruck.rescueTarget !== vehicle || vehicle.status !== 'parked') return false;
+    const bay = this.garage.bayById(vehicle.bayId);
+    if (!bay) {
+      this.towTruck.finishHome();
+      return false;
+    }
+    this.towTruck.movementKind = 'tow';
+    const started = this.towTruck.drive(this.garage.towApproachPath(this.towTruck, vehicle, bay), {
+      status: 'tow-approach',
+      onComplete: () => this.beginTowAway(vehicle),
+    });
+    if (!started) this.towTruck.finishHome();
+    else {
+      this.playVehicleEngine(this.towTruck);
+      this.particles.sparkle(this.towTruck.x, this.towTruck.y - 35, 8);
+    }
+    return started;
+  }
+
+  beginTowAway(vehicle) {
+    const paths = this.garage.towAwayPaths(this.towTruck, vehicle);
+    const towCheck = validateMotionPath(paths.tow, { minTurnRadius: this.towTruck.config.minTurnRadius });
+    const targetCheck = validateMotionPath(paths.target, { minTurnRadius: vehicle.config.minTurnRadius });
+    if (!towCheck.ok || !targetCheck.ok) {
+      console.warn('Rejected tow-away path:', [...towCheck.errors, ...targetCheck.errors]);
+      this.beginTowReturn();
+      return false;
+    }
+    if (!this.towTruck.attach(vehicle)) {
+      this.beginTowReturn();
+      return false;
+    }
+    vehicle.movementKind = 'tow';
+    this.towTruck.movementKind = 'tow';
+    const targetStarted = vehicle.drive(paths.target, {
+      status: 'towed',
+      onComplete: () => {
+        this.removeVehicle(vehicle);
+        this.save();
+      },
+    });
+    if (!targetStarted) {
+      vehicle.status = 'parked';
+      this.towTruck.releaseTarget();
+      this.beginTowReturn();
+      return false;
+    }
+    const towStarted = this.towTruck.drive(paths.tow, {
+      status: 'towing',
+      onComplete: () => {
+        if (this.vehicles.includes(vehicle)) {
+          this.removeVehicle(vehicle);
+          this.save();
+        }
+        this.towTruck.releaseTarget();
+        this.beginTowReturn();
+      },
+    });
+    if (!towStarted) {
+      console.warn('Tow-away paths passed preflight but failed to start.');
+      vehicle.motion.stop();
+      vehicle.status = 'parked';
+      this.towTruck.releaseTarget();
+      this.beginTowReturn();
+      return false;
+    }
+    this.playVehicleEngine(this.towTruck);
+    return true;
+  }
+
+  beginTowReturn() {
+    this.towTruck.releaseTarget();
+    this.towTruck.movementKind = 'tow';
+    const started = this.towTruck.drive(this.garage.towHomePath(this.towTruck), {
+      status: 'tow-returning',
+      onComplete: () => {
+        this.towTruck.finishHome();
+        this.particles.sparkle(this.towTruck.x, this.towTruck.y - 35, 10);
+        this.sound.happy();
+        this.flushMovementQueue();
+        this.ensureArrival();
+      },
+    });
+    if (!started) console.warn('Tow truck could not start its validated route home.');
+    return started;
+  }
+
   scheduleMovement(key, kind, vehicle, start) {
+    const safeReturnMovement = ['arrival', 'parking'].includes(kind) && this.towTruck.status === 'tow-returning';
+    if (this.towTruck.engaged && kind !== 'tow' && !safeReturnMovement) return false;
     const existing = this.movementQueue.find((entry) => entry.key === key);
     if (existing) {
       existing.kind = kind;
@@ -266,6 +440,10 @@ export class Game {
   }
 
   canStartMovement(kind) {
+    if (kind === 'tow') {
+      return this.towTruck.status === 'tow-queued' && !this.vehicles.some((vehicle) => vehicle.moving);
+    }
+    if (this.towTruck.engaged && !(['arrival', 'parking'].includes(kind) && this.towTruck.status === 'tow-returning')) return false;
     const active = this.vehicles.filter((vehicle) => vehicle.moving);
     return active.every((vehicle) => {
       const activeKind = vehicle.movementKind;
@@ -291,6 +469,7 @@ export class Game {
   }
 
   ensureArrival() {
+    if (this.towTruck.engaged && this.towTruck.status !== 'tow-returning') return false;
     if (this.vehicles.some((vehicle) => ['arriving', 'waiting'].includes(vehicle.status))) return false;
     if (this.movementQueue.some((entry) => entry.kind === 'arrival')) return false;
     return this.spawnArrival();
@@ -305,6 +484,7 @@ export class Game {
   }
 
   spawnArrival(forcedType = null, scheduled = false) {
+    if (this.towTruck.engaged && this.towTruck.status !== 'tow-returning') return false;
     if (this.vehicles.some((vehicle) => ['arriving', 'waiting'].includes(vehicle.status))) return false;
     const compatible = this.availableArrivalTypes();
     if (!compatible.length) return false;
@@ -398,6 +578,7 @@ export class Game {
   }
 
   requestPickup() {
+    if (this.towTruck.engaged) return false;
     const parked = this.vehicles.filter((vehicle) => vehicle.status === 'parked' && !vehicle.problem);
     if (!parked.length) {
       this.sound.squeak();
@@ -532,9 +713,20 @@ export class Game {
   // probes see each other does move order break the tie. Stationary blockers
   // always win.
   motionBlocked(vehicle) {
+    const towTarget = this.towTruck.towing;
+    if (towTarget && (vehicle === this.towTruck || vehicle === towTarget)) {
+      // The two independently driven actors are one coupled unit. If either
+      // one sees an unrelated blocker, both hold the same frame; the intended
+      // hook pair never mistakes its own close spacing for a collision.
+      return Boolean(this.towPairBlockedThisFrame);
+    }
     const probe = vehicle.aheadFootprint();
     for (const other of this.vehicles) {
       if (other === vehicle) continue;
+      if (vehicle === this.towTruck && this.towTruck.status === 'tow-approach' &&
+          (other === this.towTruck.rescueTarget || other.status === 'waiting')) {
+        continue;
+      }
       if (!polygonsOverlap(probe, other.footprint(4))) continue;
       if (other.moving) {
         const mutualConflict = polygonsOverlap(other.aheadFootprint(), vehicle.footprint(4));
@@ -595,6 +787,10 @@ export class Game {
 
   onMotionCue(vehicle, cue) {
     if (cue === 'hello') this.playVehicleHorn(vehicle);
+    if (cue === 'tow-dispatch') {
+      this.playVehicleHorn(vehicle);
+      this.say('tow_rescue', vehicle);
+    }
   }
 
   say(key, vehicle = null, options = {}) {
@@ -638,7 +834,15 @@ export class Game {
       this.resize();
     }
     this.garage.update(dt);
+    const towTarget = this.towTruck.towing;
+    this.towPairBlockedThisFrame = Boolean(towTarget) && [this.towTruck, towTarget].some((mover) => {
+      const probe = mover.aheadFootprint();
+      return this.vehicles.some((other) =>
+        other !== towTarget && polygonsOverlap(probe, other.footprint(4))
+      );
+    });
     for (const vehicle of this.vehicles) vehicle.update(dt);
+    this.towTruck.update(dt);
     this.particles.update(dt);
     this.flushMovementQueue();
     this.ensureArrival();
@@ -647,6 +851,16 @@ export class Game {
   draw() {
     const ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    // Canvas drawing state survives between frames. Reset the global pieces
+    // that shadows, lighting, and debug overlays may change so one effect can
+    // never stain a later frame or accelerated canvas tile.
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.setLineDash([]);
     ctx.fillStyle = '#10283a';
     ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.setTransform(this.dpr * this.scale, 0, 0, this.dpr * this.scale, this.offsetX * this.dpr, this.offsetY * this.dpr);
@@ -654,6 +868,7 @@ export class Game {
 
     const entries = [
       ...this.vehicles.map((vehicle) => ({ baseline: vehicle.baseline, draw: () => vehicle.draw(ctx, this.assets) })),
+      { baseline: this.towTruck.baseline, draw: () => this.towTruck.draw(ctx, this.assets) },
     ];
     entries.sort((a, b) => a.baseline - b.baseline);
     for (const entry of entries) entry.draw();
@@ -670,6 +885,13 @@ export class Game {
   // wheels/heading, active motion paths, and every static hit zone.
   drawDebug(ctx) {
     ctx.save();
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+    ctx.setLineDash([]);
     ctx.lineWidth = 2;
     const poly = (points) => {
       ctx.beginPath();
@@ -677,45 +899,96 @@ export class Game {
       ctx.closePath();
       ctx.stroke();
     };
-    for (const vehicle of this.vehicles) {
+    const cornerMarks = (points, size = 7) => {
+      ctx.beginPath();
+      for (const point of points) {
+        ctx.moveTo(point.x - size, point.y);
+        ctx.lineTo(point.x + size, point.y);
+        ctx.moveTo(point.x, point.y - size);
+        ctx.lineTo(point.x, point.y + size);
+      }
+      ctx.stroke();
+    };
+    const pointInDebugBounds = (point, margin = 2) =>
+      point.x >= margin && point.x <= WORLD_W - margin &&
+      point.y >= margin && point.y <= WORLD_H - margin;
+    const canStrokePoly = (points) => points.every((point) =>
+      point.x >= 2 && point.x <= WORLD_W - 2 && point.y >= 2 && point.y <= WORLD_H - 2
+    );
+    const rectCorners = (rect) => {
+      const markMargin = 12;
+      const left = Math.max(markMargin, rect.x);
+      const top = Math.max(markMargin, rect.y);
+      const right = Math.min(WORLD_W - markMargin, rect.x + rect.w);
+      const bottom = Math.min(WORLD_H - markMargin, rect.y + rect.h);
+      return [
+        { x: left, y: top },
+        { x: right, y: top },
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+      ];
+    };
+    for (const vehicle of [...this.vehicles, this.towTruck]) {
+      const debugRadius = Math.max(vehicle.config.length, vehicle.config.width) + 50;
+      if (
+        vehicle.x < -debugRadius || vehicle.x > WORLD_W + debugRadius ||
+        vehicle.y < -debugRadius || vehicle.y > WORLD_H + debugRadius
+      ) continue;
       ctx.strokeStyle = '#3dff6e';
       ctx.setLineDash([]);
-      poly(vehicle.footprint());
+      const footprint = vehicle.footprint();
+      if (canStrokePoly(footprint)) poly(footprint);
       ctx.strokeStyle = '#ffe14d';
-      ctx.setLineDash([6, 6]);
-      poly(vehicle.footprint(38));
+      // Solid outlines remain reliable when deterministic tests drive actors
+      // through and beyond the canvas edge; clipped dashes can corrupt
+      // compositor tiles in both Firefox and Chromium.
       ctx.setLineDash([]);
-      ctx.fillStyle = '#ff4dc4';
-      ctx.beginPath();
-      ctx.arc(vehicle.x, vehicle.y, 4, 0, TAU);
-      ctx.fill();
-      ctx.strokeStyle = '#ff4dc4';
-      ctx.beginPath();
-      ctx.moveTo(vehicle.x, vehicle.y);
-      ctx.lineTo(vehicle.x + Math.cos(vehicle.heading) * 46, vehicle.y + Math.sin(vehicle.heading) * 46);
-      ctx.stroke();
+      const tapFootprint = vehicle.footprint(38);
+      if (tapFootprint.every((point) => pointInDebugBounds(point, 9))) cornerMarks(tapFootprint);
+      ctx.setLineDash([]);
+      const headingEnd = {
+        x: vehicle.x + Math.cos(vehicle.heading) * 46,
+        y: vehicle.y + Math.sin(vehicle.heading) * 46,
+      };
+      if (pointInDebugBounds(vehicle, 6) && pointInDebugBounds(headingEnd, 6)) {
+        ctx.fillStyle = '#ff4dc4';
+        ctx.beginPath();
+        ctx.arc(vehicle.x, vehicle.y, 4, 0, TAU);
+        ctx.fill();
+        ctx.strokeStyle = '#ff4dc4';
+        ctx.beginPath();
+        ctx.moveTo(vehicle.x, vehicle.y);
+        ctx.lineTo(headingEnd.x, headingEnd.y);
+        ctx.stroke();
+      }
       const path = vehicle.motion.path;
       if (path) {
         ctx.strokeStyle = '#53e0ff';
         ctx.beginPath();
+        let drawing = false;
         for (const segment of path) {
           for (let index = 0; index <= 16; index++) {
             const point = cubicPoint(segment, index / 16);
-            if (index === 0) ctx.moveTo(point.x, point.y);
+            if (!pointInDebugBounds(point)) {
+              drawing = false;
+              continue;
+            }
+            if (!drawing) ctx.moveTo(point.x, point.y);
             else ctx.lineTo(point.x, point.y);
+            drawing = true;
           }
         }
         ctx.stroke();
       }
     }
     ctx.strokeStyle = '#ff4dc4';
-    ctx.setLineDash([8, 6]);
-    for (const bay of this.garage.bays) ctx.strokeRect(bay.hit.x, bay.hit.y, bay.hit.w, bay.hit.h);
+    ctx.setLineDash([]);
+    for (const bay of this.garage.bays) cornerMarks(rectCorners(bay.hit), 10);
     if (this.garage.serviceStationsEnabled) {
-      for (const station of this.garage.stations) ctx.strokeRect(station.hit.x, station.hit.y, station.hit.w, station.hit.h);
+      for (const station of this.garage.stations) cornerMarks(rectCorners(station.hit), 10);
     }
     const booth = this.garage.pickupBooth.hit;
-    ctx.strokeRect(booth.x, booth.y, booth.w, booth.h);
+    cornerMarks(rectCorners(booth), 10);
     ctx.restore();
   }
 

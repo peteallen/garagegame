@@ -22,6 +22,7 @@ SFX = {
     # world / interaction
     "pickup_bell": ("One bright old-fashioned brass service counter bell ding, cheerful and clean, short natural decay, no voices, no background noise", 1.2),
     "backup_beeper": ("One single gentle commercial vehicle reverse warning beep, rounded toddler-friendly tone, clean isolated sound, no engine or background noise", 0.8),
+    "tow_clunk": ("A tow truck steel hook coupling securely with one satisfying padded clunk and a tiny chain jingle, clean isolated sound, no engine", 1.2),
     "siren_chirp": ("One very short friendly rescue vehicle siren chirp, two rising electronic notes, playful not alarming, clean isolated sound", 1.1),
     "alarm_chirp": ("A cute car alarm lock confirmation, exactly two short electronic chirps, friendly and clean, no siren and no background noise", 1.0),
     "confetti_pop": ("One soft festive party popper pop with fluttering paper confetti falling, gentle and celebratory, clean isolated sound, no voices", 1.5),
@@ -44,6 +45,7 @@ SFX = {
     "horn_icecream": ("One whimsical two-note ice cream truck horn greeting, bright bell-like tones, not a recognizable song, clean isolated sound", 1.4),
     "horn_ev": ("One short soft futuristic electric car greeting chime, bright rounded two-note tone, clean isolated sound, no engine", 1.0),
     "horn_bus": ("One short deep school bus horn toot, warm rounded and child-friendly, clean isolated sound, no engine or traffic", 1.2),
+    "horn_tow": ("One short sturdy tow truck horn toot, medium-low friendly tone with a tiny mechanical character, clean isolated sound", 1.1),
     # engines — shared by weight class (see vehicleCatalog.js engine keys)
     "engine_sports": ("A small sporty car engine giving one playful smooth rev up and settling down, polished and friendly, clean isolated sound", 2.8),
     "engine_pickup": ("A friendly pickup truck gasoline engine starting and giving one warm medium-low rev, smooth clean isolated sound", 3.0),
